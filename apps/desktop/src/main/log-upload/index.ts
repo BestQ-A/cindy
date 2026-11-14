@@ -48,7 +48,6 @@ import {
 import type { ConsentGateDeps } from './consentGate';
 import { evaluateGate } from './consentGate';
 import { sendLogs } from './logSink';
-import { resolveLogUploadTarget } from './logUploadTarget';
 import {
   clearCrashAutoUploadOverride,
   isCrashAutoUploadCustomized,
@@ -108,15 +107,9 @@ function ensureMarkerStore(): PendingMarkerStore {
   return markerStore;
 }
 
-/**
- * 本构建的上报目标。值由打包期注入（见 `logUploadTarget.ts`），这里只做区域交叉校验后取用。
- *
- * 不再看 `app.isPackaged`：目标是打包脚本按构建区域注入的，dev server 与本地 `pnpm dev`
- * 根本拿不到注入值 ⇒ 天然关闭。开发者要联调时显式设 `XDT_LOG_UPLOAD_TARGET`（且其中的
- * region 必须与本构建区域一致），那是一次明确的动作，不是意外。
- */
+/** Keep log collection local by disabling every remote upload target. */
 function currentTarget(): LogUploadTarget | null {
-  return resolveLogUploadTarget({ region: CURRENT_CINDY_REGION });
+  return null;
 }
 
 /**
@@ -323,7 +316,7 @@ async function runStartupBackfill(): Promise<void> {
 
 /** 由 bootstrap 在主窗口 ready-to-show 之后调用。幂等。 */
 export function scheduleStartupBackfill(): void {
-  if (startupBackfillTimer) return;
+  if (!currentTarget() || startupBackfillTimer) return;
   startupBackfillTimer = setTimeout(() => {
     startupBackfillTimer = null;
     // 尸检补标记排在补传之前:同一次启动就能把原生崩溃的现场传上来。

@@ -1,12 +1,11 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Activity, CheckCircle2, FolderOpen, Monitor, RotateCcw, Square } from 'lucide-react';
+import { Activity, CheckCircle2, FolderOpen, Monitor, Square } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { WINDOW_NO_DRAG_STYLE } from '@/components/layout/windowDrag';
 import { installPerformanceTraceProbe } from '@/lib/performanceTraceProbe';
-import { extractIpcError } from '@/utils/ipcError';
 import type {
   PerformanceTraceCommand,
   PerformanceTraceState,
@@ -32,13 +31,11 @@ export function PerformanceTrace({
   const [state, setState] = useState(INITIAL);
   const [view, setView] = useState<'start' | 'result' | 'previous'>('start');
   const [open, setOpen] = useState(false);
-  const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [elapsed, setElapsed] = useState(0);
   const cleanupProbe = useRef<(() => void) | null>(null);
-  const noteId = useId();
   useEffect(() => {
     const api = window.electronAPI.performanceTrace;
     if (!api) return;
@@ -53,7 +50,6 @@ export function PerformanceTrace({
       }
       if (next.phase === 'idle') {
         setView('start');
-        setNote('');
         setError('');
         setOpen(false);
       }
@@ -95,7 +91,7 @@ export function PerformanceTrace({
       }
     };
   }, [state.phase, state.startedAt]);
-  const run = async (command: PerformanceTraceCommand) => {
+  const run = async (command: Exclude<PerformanceTraceCommand, 'state' | 'upload'>) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
@@ -105,30 +101,17 @@ export function PerformanceTrace({
       cleanupProbe.current = null;
     }
     try {
-      const next = await window.electronAPI.performanceTrace.command(
-        command,
-        command === 'upload' ? note : undefined,
-      );
+      const next = await window.electronAPI.performanceTrace.command(command);
       setState(next);
       if (command === 'start') {
         setView('start');
-        setNote('');
         setOpen(false);
-      } else if (command === 'stop' || command === 'upload') {
+      } else if (command === 'stop') {
         setView((current) => (current === 'previous' ? current : 'result'));
         setOpen(true);
       }
-    } catch (cause) {
-      const code = extractIpcError(cause)?.code;
-      setError(
-        t(
-          code === 'LOG_UPLOAD_UNAVAILABLE'
-            ? 'performanceTrace.unavailable'
-            : code === 'PRIVACY_CONSENT_REQUIRED'
-              ? 'performanceTrace.consent'
-              : 'performanceTrace.failed',
-        ),
-      );
+    } catch {
+      setError(t('performanceTrace.failed'));
       setOpen(true);
     } finally {
       busyRef.current = false;
@@ -251,42 +234,9 @@ export function PerformanceTrace({
                       })}
                     </span>
                   </div>
-                  {!state.uploaded && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      tone="quiet"
-                      disabled={pending}
-                      onClick={() => void run('start')}
-                    >
-                      <RotateCcw size={14} aria-hidden />
-                      {t('performanceTrace.new')}
-                    </Button>
-                  )}
                 </div>
                 {state.partial && <p role="status">{t('performanceTrace.partial')}</p>}
-                {state.uploaded ? (
-                  <p role="status">{t('performanceTrace.uploaded', { id: state.reportId })}</p>
-                ) : (
-                  <>
-                    <div className="space-y-2">
-                      <label className="block font-medium" htmlFor={noteId}>
-                        {t('performanceTrace.note')}
-                      </label>
-                      <textarea
-                        id={noteId}
-                        rows={4}
-                        maxLength={1000}
-                        value={note}
-                        disabled={pending}
-                        onChange={(event) => setNote(event.target.value)}
-                        className="block w-full resize-y rounded-lg border border-input bg-background p-3 text-13 leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                      />
-                    </div>
-                  </>
-                )}
                 <div className="space-y-2 text-muted-foreground">
-                  <p>{t('performanceTrace.resultDescription')}</p>
                   <p>{t('performanceTrace.localScope')}</p>
                   <Button
                     size="sm"
@@ -310,15 +260,13 @@ export function PerformanceTrace({
         }
         confirmText={t(
           ready
-            ? state.uploaded
-              ? 'performanceTrace.new'
-              : 'performanceTrace.submit'
+            ? 'performanceTrace.new'
             : recording
               ? 'performanceTrace.stop'
               : 'performanceTrace.start',
         )}
         onConfirm={() =>
-          void run(ready ? (state.uploaded ? 'start' : 'upload') : recording ? 'stop' : 'start')
+          void run(recording && !ready ? 'stop' : 'start')
         }
         cancelText={t('performanceTrace.close')}
         onCancel={() => setOpen(false)}

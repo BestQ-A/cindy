@@ -650,7 +650,6 @@ import {
   supportsLinuxClipboard,
   writeLinuxClipboard,
 } from './remote-desktop/linuxClipboardNative';
-import { initHeartbeatService } from './heartbeatService';
 import { markStartupMilestone } from './startupTimeline';
 import { registerRemoteDesktopIpc } from './remote-desktop';
 import { isAwayCoverUp, registerAwayGuardIpc, startAwayGuard } from './remote-desktop/awayGuardService';
@@ -10509,8 +10508,6 @@ app.on('ready', async () => {
     prewarmMacComputerPermissionGuideHelper();
   }, 3_000);
   initUpdateService();
-  // 在线人数心跳:App 启动即上报,内部走 deviceId / userId 兜底,登录前后都活
-  if (!hostClientMode) initHeartbeatService();
   // 设备互联(跨设备远程控制):登录后连 relay,登出即断;开关与设备列表 IPC 一并注册
   let updateRelaunchRemoteBusy = false;
   setUsageWidgetSnapshotReader(readUsageWidgetSnapshot);

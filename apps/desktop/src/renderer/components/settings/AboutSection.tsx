@@ -24,9 +24,7 @@ import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useExperimentalFlag } from '@/hooks/useExperimentalFeatures';
 import { useAutoUpdateSettings } from '@/hooks/useAutoUpdateSettings';
-import { useAnalyticsSettings } from '@/hooks/useAnalyticsSettings';
-import { useLogUploadSettings } from '@/hooks/useLogUploadSettings';
-import { OpenLogsRow, UploadLogsRow } from '@/components/log-support/LogSupportActions';
+import { OpenLogsRow } from '@/components/log-support/LogSupportActions';
 import { PiKernelVersionRow } from './PiKernelVersionRow';
 import { HARNESS_MENU_ITEM_CLASS, HarnessMenuFootnote, HarnessVersionMenuItem, HarnessVersionMenuRow } from './HarnessVersionMenuRow';
 import { DefaultOverrideControls } from './DefaultOverrideControls';
@@ -348,15 +346,10 @@ export function AboutSection() {
           />
         )}
         <AutoUpdateToggleRow />
-        <AnalyticsToggleRow />
         <AgentVersionsRows />
         <DebugLogToggleRow />
         <SettingsBlock id={aboutSettings.logsDirLabel.targetId} className="p-0">
           <OpenLogsRow />
-        </SettingsBlock>
-        <CrashAutoUploadToggleRow />
-        <SettingsBlock id={aboutSettings.logUploadUploadLabel.targetId} className="p-0">
-          <UploadLogsRow />
         </SettingsBlock>
         <LegalLinksRows />
       </SettingsCard>
@@ -581,76 +574,6 @@ export function AutoUpdateToggleRow() {
 }
 
 /**
- * 使用统计(TapDB)开关。
- *
- * 语义是 opt-out:用户在登录页同意《隐私政策》后默认开启,这里可以随时关掉。
- * 关掉即时生效(main 广播 → tapdbClient 走 SDK optOutTracking,连 autoTrack 的
- * 自动事件也会停),不需要重启。
- *
- * 「恢复默认」只删掉开关这条 override,让它重新跟随版本默认值;同意状态是事实记录、
- * 不是配置项,不会被它清掉(configuration-and-overrides §4)。没有这个入口的话,
- * 用户把开关拨回当前默认值写入的是一个显式 true,此后再也跟不上默认值的变化。
- */
-function AnalyticsToggleRow() {
-  const { t } = useTranslation();
-  const { state, setAnalyticsEnabled, resetAnalyticsEnabled } = useAnalyticsSettings();
-  const [saving, setSaving] = useState(false);
-
-  const handleToggle = async (next: boolean) => {
-    setSaving(true);
-    try {
-      await setAnalyticsEnabled(next);
-      toast.success(
-        next
-          ? t('settings.about.analyticsEnabledToast')
-          : t('settings.about.analyticsDisabledToast'),
-      );
-    } catch {
-      // 不透传 err.message:main 侧的 IPC 错误串是英文技术串(`[INTERNAL] ...`),
-      // 直接 toast 出去会让非中文用户看到不可读的内部信息。错误码只用于分支,
-      // 展示一律走本地化文案。
-      toast.error(t('settings.about.analyticsSaveFailed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleReset = async () => {
-    setSaving(true);
-    try {
-      await resetAnalyticsEnabled();
-      toast.success(t('settings.defaults.restored'));
-    } catch {
-      toast.error(t('settings.defaults.restoreFailed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <SettingsRow
-      title={<span id={aboutSettings.analyticsLabel.targetId}>{t(aboutSettings.analyticsLabel.titleKey)}</span>}
-      hint={t(aboutSettings.analyticsLabel.descriptionKey)}
-      trailing={
-        <div className="flex shrink-0 items-center gap-2">
-          <DefaultOverrideControls
-            isCustomized={state.analyticsEnabledCustomized}
-            disabled={state.loading || saving}
-            onReset={handleReset}
-          />
-          <Switch data-setting-id={aboutSettings.analyticsLabel.id}
-            checked={state.analyticsEnabled}
-            disabled={state.loading || saving}
-            onCheckedChange={handleToggle}
-            aria-label={t(aboutSettings.analyticsLabel.titleKey)}
-          />
-        </div>
-      }
-    />
-  );
-}
-
-/**
  * Debug 日志开关。
  *
  * 之前挂在 admin-only 的 ExperimentalSection 下，普通用户看不见也用不上;
@@ -682,78 +605,6 @@ function DebugLogToggleRow() {
           onCheckedChange={setEnabled}
           aria-label={t(aboutSettings.debugLogLabel.titleKey)}
         />
-      }
-    />
-  );
-}
-
-/**
- * 「崩溃时自动上传日志」开关。**默认关闭**。
- *
- * 语义是 opt-in:必须已同意《隐私政策》**且**用户显式打开,崩溃现场才会被自动送达。
- * 关掉开关会立刻清掉已有的待补传标记(main 侧做),不会在下次启动偷偷补传。
- *
- * 「恢复默认」删掉这条 override 重新跟随版本默认值;因为默认值就是关闭,用户「打开又关掉」
- * 会留痕(main 侧 preserveDefaults),这也是合规问询时能自证的依据。
- */
-function CrashAutoUploadToggleRow() {
-  const { t } = useTranslation();
-  const { state, setCrashAutoUpload, resetCrashAutoUpload } = useLogUploadSettings();
-  const [saving, setSaving] = useState(false);
-
-  const handleToggle = async (next: boolean) => {
-    setSaving(true);
-    try {
-      await setCrashAutoUpload(next);
-      toast.success(
-        next
-          ? t('settings.about.logUpload.crashAutoEnabledToast')
-          : t('settings.about.logUpload.crashAutoDisabledToast'),
-      );
-    } catch {
-      // 不透传 err.message:main 侧的 IPC 错误串是英文技术串,直接 toast 会让非中文用户
-      // 看到不可读的内部信息。
-      toast.error(t('settings.about.logUpload.saveFailed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleReset = async () => {
-    setSaving(true);
-    try {
-      await resetCrashAutoUpload();
-      toast.success(t('settings.defaults.restored'));
-    } catch {
-      toast.error(t('settings.defaults.restoreFailed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // 未配置上报目标 / 未同意隐私政策时开关不可用 —— 打开它也不会有任何效果,
-  // 让它可拨只会造成「我开了却没传」的误解。
-  const blocked = !state.targetConfigured || !state.privacyConsentAccepted;
-  const disabled = state.loading || saving || blocked;
-
-  return (
-    <SettingsRow
-      title={<span id={aboutSettings.logUploadCrashAutoLabel.targetId}>{t(aboutSettings.logUploadCrashAutoLabel.titleKey)}</span>}
-      hint={t('settings.about.logUpload.crashAutoDescription')}
-      trailing={
-        <div className="flex shrink-0 items-center gap-2">
-          <DefaultOverrideControls
-            isCustomized={state.crashAutoUploadCustomized}
-            disabled={state.loading || saving}
-            onReset={handleReset}
-          />
-          <Switch data-setting-id={aboutSettings.logUploadCrashAutoLabel.id}
-            checked={state.crashAutoUploadEnabled}
-            disabled={disabled}
-            onCheckedChange={handleToggle}
-            aria-label={t(aboutSettings.logUploadCrashAutoLabel.titleKey)}
-          />
-        </div>
       }
     />
   );
