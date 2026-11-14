@@ -11,10 +11,10 @@ import {
 } from "../shared/desktop-dev-region.mjs";
 
 test("desktop shared userData follows the region identity", () => {
-  assert.equal(desktopUserDataDirNameForRegion(), "CindyGlobal");
-  assert.equal(desktopUserDataDirNameForRegion("global"), "CindyGlobal");
-  assert.equal(desktopUserDataDirNameForRegion("cn"), "Cindy");
-  assert.equal(desktopUserDataDirNameForRegion("dev"), "CindyDev");
+  assert.equal(desktopUserDataDirNameForRegion(), "CindyPrivacy");
+  assert.equal(desktopUserDataDirNameForRegion("global"), "CindyPrivacy");
+  assert.equal(desktopUserDataDirNameForRegion("cn"), "CindyPrivacyCN");
+  assert.equal(desktopUserDataDirNameForRegion("dev"), "CindyPrivacyDev");
   assert.throws(
     () => desktopUserDataDirNameForRegion("us"),
     /expected cn, global or dev/,
@@ -24,7 +24,7 @@ test("desktop shared userData follows the region identity", () => {
 test("desktop userData path follows platform appData rules and selected region", () => {
   assert.equal(
     desktopUserDataDirForRegion("global", "darwin", {}, "/Users/tester"),
-    "/Users/tester/Library/Application Support/CindyGlobal",
+    "/Users/tester/Library/Application Support/CindyPrivacy",
   );
   assert.equal(
     desktopUserDataDirForRegion(
@@ -33,7 +33,7 @@ test("desktop userData path follows platform appData rules and selected region",
       { XDG_CONFIG_HOME: "/tmp/config" },
       "/home/tester",
     ),
-    "/tmp/config/Cindy",
+    "/tmp/config/CindyPrivacyCN",
   );
   assert.equal(
     desktopUserDataDirForRegion(
@@ -42,7 +42,7 @@ test("desktop userData path follows platform appData rules and selected region",
       { APPDATA: "C:\\Users\\tester\\AppData\\Roaming" },
       "C:\\Users\\tester",
     ),
-    "C:\\Users\\tester\\AppData\\Roaming\\CindyDev",
+    "C:\\Users\\tester\\AppData\\Roaming\\CindyPrivacyDev",
   );
 });
 

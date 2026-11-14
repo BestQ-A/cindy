@@ -48,7 +48,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureBinary } from '../../../scripts/ensure-agent-binaries.mjs';
 import { desktopClientBuildEnv } from '../../../scripts/shared/client-endpoint-build-env.mjs';
-import { desktopLogUploadBuildEnv } from '../../../scripts/shared/log-upload-build-env.mjs';
 import {
   DESKTOP_ROOT,
   RELEASE_DIR,
@@ -193,15 +192,8 @@ function runForgeMake({ platform, arch, region, version, versionless, noSign, we
     NODE_ENV: 'production',
     // 烘焙面只含 region + 端点清单自举基址,按 region 二选一。
     ...desktopClientBuildEnv({ allowEnvOverride: false, authRegion: region }),
-    // 日志上报目标(SLS project/logstore/区域)。真值不进仓,读 config/log-upload.json
-    // (打包机由 cindy-build-scripts 的 sync-desktop-release-kit.sh 拷回)。
-    // 只烘焙**本区域那一个**目标 —— cn 包里物理上不含 global 的 logstore 地址。
-    // 发行(有版本)打包:缺失 / 非法一律抛错让打包失败(除 dev 外每个区域都是必填):这是
-    // 「必须被强制要求做出选择」那条约束从 typecheck 搬过来的落点,不要改成静默跳过。
-    // 版本无关 / 开源打包(versionless):配置文件是 gitignore 的、默认 checkout 里不存在,
-    // 允许缺失 ⇒ 注入空目标、功能整体关闭,拉仓即可打包(2026-08-04 review P1)。
-    // 注意 allowMissing 只放宽「文件缺失」;文件在但内容损坏两种模式都仍然硬失败。
-    ...desktopLogUploadBuildEnv({ authRegion: region, allowMissing: versionless }),
+    // Privacy packages never embed a remote diagnostic upload destination.
+    XDT_LOG_UPLOAD_TARGET: '',
     // forge.config.ts 的 NSIS appId / AUMID 优先读这个(与 VITE_ 同源,双保险)。
     CINDY_AUTH_REGION: region,
     // forge.config.ts 注入 packagerConfig.appVersion;版本无关时为占位 0.0.0。
@@ -360,23 +352,6 @@ async function finishWindows({ artifactDir, baseName, appName, versionless, allo
   fs.copyFileSync(setupExe, installerPath);
 
   const files = [fileEntry('installer', installerPath)];
-
-  // 热更 ZIP 只对有版本的包有意义(版本无关包不参与热更新)。
-  if (!versionless) {
-    const hotfixZipPath = path.join(artifactDir, `${baseName}-hotfix.zip`);
-    console.log('==> Creating hotfix ZIP from packaged app...');
-    if (fs.existsSync(hotfixZipPath)) fs.unlinkSync(hotfixZipPath);
-    execFileSync(
-      'powershell',
-      [
-        '-NoProfile',
-        '-Command',
-        `Compress-Archive -Path '${psq(packagedDir)}\\*' -DestinationPath '${psq(hotfixZipPath)}'`,
-      ],
-      { stdio: 'inherit' },
-    );
-    files.push(fileEntry('hotfix', hotfixZipPath));
-  }
 
   return { files, signing: { installerSigned, internalExesSigned: Boolean(winSignCmd) } };
 }

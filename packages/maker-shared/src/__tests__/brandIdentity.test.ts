@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { BRAND_NAME } from '../branding.js';
 import {
   BRAND_IDENTITY,
   DEFAULT_CINDY_REGION,
@@ -21,8 +20,8 @@ import {
  * 运行时才爆炸。
  */
 describe('BRAND_IDENTITY invariants', () => {
-  it('displayName 与 branding.ts 的 BRAND_NAME 同源', () => {
-    expect(BRAND_IDENTITY.displayName).toBe(BRAND_NAME);
+  it('displayName identifies the privacy installation', () => {
+    expect(BRAND_IDENTITY.displayName).toBe('Cindy Privacy');
   });
 
   it('cdnPrefix / dbFilePrefix / updaterName 是安全的小写文件名段', () => {
@@ -53,14 +52,9 @@ describe('BRAND_IDENTITY invariants', () => {
     }
   });
 
-  it('系统身份与数据目录两区互不相同;exe 名两区同值(显示名统一决策)', () => {
-    // userData 目录 / appId 撞名会让两区共库、共系统身份,必须保持分离。
-    // exe 名(安装目录 / .app / 快捷方式)2026-07-26 起 cn/global 同值
-    // 'Cindy':owner 决策显示名统一,放弃文件层双装隔离(见
-    // executableNameByRegion doc)。cdnPrefix 两区共用是 owner 决策:
-    // 发布渠道靠不同 OSS bucket 区分,不靠路径前缀。
+  it('regional executable and data names remain independent', () => {
     expect(BRAND_IDENTITY.executableNameByRegion.cn)
-      .toBe(BRAND_IDENTITY.executableNameByRegion.global);
+      .not.toBe(BRAND_IDENTITY.executableNameByRegion.global);
     expect(BRAND_IDENTITY.userDataDirNameByRegion.cn)
       .not.toBe(BRAND_IDENTITY.userDataDirNameByRegion.global);
   });
@@ -97,9 +91,9 @@ describe('BRAND_IDENTITY invariants', () => {
     );
   });
 
-  it('身份翻转后 legacy 数组必须携带 xdt-maker 旧值(兼容锚,只增不减)', () => {
-    expect(BRAND_IDENTITY.legacySchemes).toContain('xdt-maker');
-    expect(BRAND_IDENTITY.legacyUserDataDirNames).toContain('xdt-maker');
+  it('privacy registration never claims official schemes or profiles', () => {
+    expect(allDeepLinkSchemes()).toEqual(['cindy-privacy']);
+    expect(BRAND_IDENTITY.legacyUserDataDirNames).toEqual([]);
     expect(BRAND_IDENTITY.legacyDbFilePrefixes).toContain('xdt-maker');
   });
 
@@ -136,43 +130,43 @@ describe('区域解析与派生', () => {
 
   it('brandAppId / brandBundleIdPrefix 按区域取值,默认 global', () => {
     expect(DEFAULT_CINDY_REGION).toBe('global');
-    expect(brandAppId()).toBe('com.xd.cindy');
-    expect(brandAppId('global')).toBe('com.xd.cindy');
-    expect(brandBundleIdPrefix('cn')).toBe('com.xd.cindycn');
-    expect(brandBundleIdPrefix('global')).toBe('com.xd.cindy');
+    expect(brandAppId()).toBe('com.bestqa.cindyprivacy');
+    expect(brandAppId('global')).toBe('com.bestqa.cindyprivacy');
+    expect(brandBundleIdPrefix('cn')).toBe('com.bestqa.cindyprivacycn');
+    expect(brandBundleIdPrefix('global')).toBe('com.bestqa.cindyprivacy');
   });
 
   it('brandExecutableName / brandUserDataDirName 按区域取值,默认 global', () => {
-    expect(brandExecutableName()).toBe('Cindy');
+    expect(brandExecutableName()).toBe('CindyPrivacy');
     // global 与 cn 同值(2026-07-26 显示名统一决策);dev 仍独立。
-    expect(brandExecutableName('global')).toBe('Cindy');
-    expect(brandExecutableName('dev')).toBe('CindyDev');
-    expect(brandUserDataDirName()).toBe('CindyGlobal');
-    expect(brandUserDataDirName('global')).toBe('CindyGlobal');
-    expect(brandUserDataDirName('cn')).toBe('Cindy');
+    expect(brandExecutableName('global')).toBe('CindyPrivacy');
+    expect(brandExecutableName('dev')).toBe('CindyPrivacyDev');
+    expect(brandUserDataDirName()).toBe('CindyPrivacy');
+    expect(brandUserDataDirName('global')).toBe('CindyPrivacy');
+    expect(brandUserDataDirName('cn')).toBe('CindyPrivacyCN');
   });
 });
 
 describe('派生 helper', () => {
   it('allDeepLinkSchemes 主 scheme 恒为首位且包含全部 legacy', () => {
-    expect(allDeepLinkSchemes()).toEqual(['cindy', 'xdt-maker']);
+    expect(allDeepLinkSchemes()).toEqual(['cindy-privacy']);
   });
 
   it('allUserDataDirNames 本区域目录名恒为首位 + 全部历史值,且不含另一区域', () => {
-    expect(allUserDataDirNames()).toEqual(['CindyGlobal']);
-    expect(allUserDataDirNames('cn')).toEqual(['Cindy', 'xdt-maker']);
+    expect(allUserDataDirNames()).toEqual(['CindyPrivacy']);
+    expect(allUserDataDirNames('cn')).toEqual(['CindyPrivacyCN']);
     // global 的匹配集不含 cn 的 Cindy / xdt-maker：orphan-reaper 按路径认领
     // 进程，跨区域匹配会误杀另一个安装的进程。
-    expect(allUserDataDirNames('global')).toEqual(['CindyGlobal']);
+    expect(allUserDataDirNames('global')).toEqual(['CindyPrivacy']);
   });
 
   it('legacyBrandUserDataDirNames 只返回品牌翻转前的共享 mToc 来源', () => {
-    expect(legacyBrandUserDataDirNames()).toEqual(['xdt-maker']);
+    expect(legacyBrandUserDataDirNames()).toEqual([]);
   });
 
   it('dialogue cwd 迁移来源按区域保留旧品牌目录', () => {
     expect(legacyDialogueUserDataDirNames()).toEqual([]);
-    expect(legacyDialogueUserDataDirNames('cn')).toEqual(['xdt-maker']);
+    expect(legacyDialogueUserDataDirNames('cn')).toEqual([]);
     expect(legacyDialogueUserDataDirNames('global')).toEqual([]);
     expect(legacyDialogueUserDataDirNames('dev')).toEqual([]);
   });

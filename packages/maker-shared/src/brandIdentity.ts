@@ -1,41 +1,9 @@
 /**
- * brand-identity — 产品**标识符层**身份的单一事实源(构建期单点)。
- *
- * 与 `branding.ts`(展示名层,`BRAND_NAME`)互补:那边管用户/LLM 看到的名字,
- * 这边管 OS 注册身份与磁盘/协议标识符——exe 名、AppUserModelId/bundle id、
- * 深链 scheme、userData 目录名、CDN 渠道前缀、更新器产物名等。
- *
- * 2026-07-17 身份翻转(Cindy 渠道分叉,老 /xdt-maker 渠道冻结不再发版):
- * 主值全部切换为 Cindy 系,旧值移入 legacy 数组供兼容读取与未来数据迁移方案
- * 使用。本仓构建从此产出 Cindy 身份的包(新装用户直装);存量 xdt-maker 用户
- * 停留在冻结渠道,待后续独立设计的自动迁移方案接走。
- *
- * ⚠️ 语义边界:
- *  - 这是**构建期单点,不是运行时开关**。区域(cn/global)是唯一的构建期维度,
- *    经打包命令的 CINDY_AUTH_REGION 选择,默认 global。appId / userData 目录名
- *    按区域派生(cn 与 global 是两个可并存的系统身份,appId 与 mobile 的
- *    com.xd.cindycn / com.xd.cindy 同一套);exe 名 cn/global 同值 'Cindy'
- *    (2026-07-26 显示名统一决策,文件层双装隔离随之放弃,dev 仍独立)。
- *  - 历史兼容锚点(旧 scheme 解析、旧 userData / DB 文件识别)由
- *    `legacySchemes` / `legacyUserDataDirNames(ByRegion)` / `legacyDbFilePrefixes`
- *    承载,只增不减:老用户机器上的存量注册与文件可能永远带着旧值。
- *  - 永久不随本配置变化的标识符(settings 键名 `xdtMaker.*`、
- *    `xdt-image://` 等进程内 scheme、`.cshare` 扩展名、
- *    localStorage 键等)由各自协议/存储模块维护,
- *    不要试图从这里派生它们。
- *  - `updaterName` = `cindy-updater`(2026-07-17 经 owner 确认随品牌翻转改名,
- *    docs/dev-rules/cindy-updater.md;老渠道已冻结、新应用未发过版,无自更新兼容包袱)。
- *    消费方:updateService(resources 源名 + %TEMP% 运行名)、forge prePackage
- *    构建/签名/extraResource、notices 脚本登记路径。
- *
- * 消费方:
- *  - apps/desktop forge.config.ts(executableName / appId / protocols / UTI)
- *  - apps/desktop main 常量(AUMID、深链、orphan-reaper 路径标记、skillhub
- *    usageIndexer 的 userData 兜底路径、localDb 文件名前缀)
- *  - release / publish / smoke 脚本(产物名、OSS 前缀)
+ * OS, storage and protocol identity for the independent Cindy Privacy fork.
+ * Forge, desktop runtime and script mirrors must use these same values.
+ * Official Cindy profiles and URL registrations are intentionally separate.
+ * The region remains a build-time choice with Global as its default.
  */
-
-import { BRAND_NAME } from './branding.js';
 
 /**
  * 构建期区域维度(与 mobile 的 EXPO_PUBLIC_CINDY_AUTH_REGION 同语义)。
@@ -134,55 +102,41 @@ export interface BrandIdentity {
   readonly legacyDbFilePrefixes: readonly string[];
 }
 
-/**
- * 当前生效的身份档案(Cindy,2026-07-17 翻转)。
- * 旧 xdt-maker 值全部下沉 legacy 数组。
- *
- * 区域差异字段:appId、userDataDirName 按区域派生(cn/global 是两个可并存
- * 的系统身份,数据分库);executableName 自 2026-07-26 起 cn/global 同值
- * (显示统一为 Cindy,放弃文件层双装隔离,见 executableNameByRegion doc),
- * 仅 dev 保持独立名;深链 scheme、展示名 BRAND_NAME、cdnPrefix、dbFilePrefix、
- * updaterName 两区共用(scheme 共用是 owner 决策:双装时后注册者赢,单装用户
- * 无感;cdnPrefix 共用因发布渠道靠不同 OSS bucket 区分;db 前缀因 userData
- * 已分目录无需再区分)。
- */
+/** Privacy installations use independent paths, app IDs and protocol registration. */
 export const BRAND_IDENTITY: BrandIdentity = Object.freeze({
-  displayName: BRAND_NAME,
-  executableName: 'Cindy',
+  displayName: 'Cindy Privacy',
+  executableName: 'CindyPrivacyCN',
   executableNameByRegion: Object.freeze({
-    cn: 'Cindy',
-    // 2026-07-26 与 cn 同值(见字段 doc):global 包全部可见位置显示 Cindy,
-    // 放弃 cn/global 同机双装的文件层隔离;appId / userData 仍分区。
-    global: 'Cindy',
-    dev: 'CindyDev',
+    cn: 'CindyPrivacyCN',
+    global: 'CindyPrivacy',
+    dev: 'CindyPrivacyDev',
   }),
   appIdByRegion: Object.freeze({
-    cn: 'com.xd.cindycn',
-    global: 'com.xd.cindy',
-    dev: 'com.xd.cindydev',
+    cn: 'com.bestqa.cindyprivacycn',
+    global: 'com.bestqa.cindyprivacy',
+    dev: 'com.bestqa.cindyprivacydev',
   }),
-  primaryScheme: 'cindy',
-  legacySchemes: Object.freeze(['xdt-maker']),
-  userDataDirName: 'Cindy',
+  primaryScheme: 'cindy-privacy',
+  legacySchemes: Object.freeze([]),
+  userDataDirName: 'CindyPrivacyCN',
   userDataDirNameByRegion: Object.freeze({
-    cn: 'Cindy',
-    global: 'CindyGlobal',
-    dev: 'CindyDev',
+    cn: 'CindyPrivacyCN',
+    global: 'CindyPrivacy',
+    dev: 'CindyPrivacyDev',
   }),
-  legacyUserDataDirNames: Object.freeze(['xdt-maker']),
+  legacyUserDataDirNames: Object.freeze([]),
   legacyUserDataDirNamesByRegion: Object.freeze({
-    cn: Object.freeze(['xdt-maker']),
+    cn: Object.freeze([]),
     global: Object.freeze([]),
     dev: Object.freeze([]),
   }),
   legacyDialogueUserDataDirNamesByRegion: Object.freeze({
-    cn: Object.freeze(['xdt-maker']),
-    // xdt-maker 是旧 CN 渠道的数据来源；Global 不导入或改写 CN 的历史 cwd。
+    cn: Object.freeze([]),
     global: Object.freeze([]),
     dev: Object.freeze([]),
   }),
-  cdnPrefix: 'cindy',
-  updaterName: 'cindy-updater',
+  cdnPrefix: 'cindy-privacy',
+  updaterName: 'cindy-privacy-updater',
   dbFilePrefix: 'cindy',
   legacyDbFilePrefixes: Object.freeze(['xdt-maker']),
 });

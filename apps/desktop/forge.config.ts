@@ -31,10 +31,6 @@ import {
 } from './src/main/remote-desktop/swiftTarget';
 import { READ_SHEET_RUNTIME_PACKAGES } from '../../packages/lizi-mcps/src/cindy-docs/readSheetRuntimeDeps';
 import { reviewPdfRuntimePackages } from './src/main/reviewer/reviewPdfRuntimeDeps';
-import {
-  validateBundledWindowsUpdaterRuntime,
-  windowsUpdaterRuntimeExtraResourceForTarget,
-} from './src/main/windowsUpdaterPrerequisites';
 
 const _require = createRequire(__filename);
 const DESKTOP_PACKAGE_VERSION = (_require('./package.json') as { version: string }).version;
@@ -99,16 +95,11 @@ const CINDY_REGION = resolveCindyRegion(
 process.env.VITE_CINDY_AUTH_REGION = CINDY_REGION;
 const CINDY_APP_ID = brandAppId(CINDY_REGION);
 const CINDY_UTI_PREFIX = brandBundleIdPrefix(CINDY_REGION);
-/**
- * 可执行文件基名,按区域派生(cn/global 同值 'Cindy',dev 'CindyDev';
- * 2026-07-26 显示名统一决策,cn/global 文件层双装隔离随之放弃,见
- * brandIdentity.ts executableNameByRegion doc)。运行时 userData 目录由 main
- * 入口按同一区域切换(src/main/regionUserData.ts),两端从 brand-identity
- * 同源派生,cn/global 数据仍分库。
- */
+/** Independent executable and installation names come from the privacy identity. */
 const CINDY_EXE = brandExecutableName(CINDY_REGION);
-/** 更新器二进制文件名(cindy-updater.exe)。 */
-const UPDATER_EXE = `${BRAND_IDENTITY.updaterName}.exe`;
+const CINDY_DISPLAY_NAME = CINDY_REGION === 'global'
+  ? BRAND_IDENTITY.displayName
+  : `${BRAND_IDENTITY.displayName} ${CINDY_REGION === 'cn' ? 'CN' : 'Dev'}`;
 
 // discord.js is externalized from the main Vite bundle because its circular
 // CommonJS graph crashes when Rollup reorders it. Its dependency tree contains
@@ -459,112 +450,6 @@ const isDev =
 const isWin = process.platform === 'win32';
 
 /**
- * Build cindy-updater (Rust + Tauri) and copy the release binary into
- * resources/. Runs once per `forge package` / `make` invocation, so
- * `pnpm build` / `pnpm release:win` always ship the latest updater.
- *
- * Skipped on non-Windows hosts (the updater is currently Win-only).
- * Hard-fails if cargo is missing or the build errors — we'd rather break
- * the release than ship a stale updater.
- */
-function buildCindyUpdater(): void {
-  if (process.platform !== 'win32') return;
-  console.log(`[forge:prePackage] Building ${UPDATER_EXE} (Rust + Tauri)...`);
-
-  const updaterRoot = path.join(__dirname, 'cindy-updater', 'src-tauri');
-  if (!fs.existsSync(updaterRoot)) {
-    throw new Error(`[forge] cindy-updater source missing at ${updaterRoot}`);
-  }
-
-  // winget-installed Rust may not be on PATH in this shell session, fall
-  // back to the well-known per-user install location.
-  const cargoBin = process.env.USERPROFILE
-    ? path.join(process.env.USERPROFILE, '.cargo', 'bin', 'cargo.exe')
-    : 'cargo';
-  const cargo = fs.existsSync(cargoBin) ? cargoBin : 'cargo';
-
-  const t0 = Date.now();
-  const r = spawnSync(
-    cargo,
-    ['build', '--release', '--manifest-path', path.join(updaterRoot, 'Cargo.toml')],
-    { stdio: 'inherit' },
-  );
-  if (r.error) {
-    throw new Error(`[forge] failed to invoke cargo (${cargo}): ${r.error.message}`);
-  }
-  if (r.status !== 0) {
-    throw new Error(`[forge] cargo build --release failed with exit code ${r.status}`);
-  }
-
-  const builtExe = path.join(updaterRoot, 'target', 'release', UPDATER_EXE);
-  const destExe = path.join(__dirname, 'resources', UPDATER_EXE);
-  if (!fs.existsSync(builtExe)) {
-    throw new Error(`[forge] cargo build succeeded but ${builtExe} is missing`);
-  }
-
-  // 替换 exe 内嵌 manifest, 声明 SupportedOS=Vista+ 让 Windows 跳过 PCA
-  // (程序兼容性助手) 启发式——否则 exe 名带 "update" 会被 PCA 误判为
-  // "安装失败的安装程序", 弹"可能未正确安装此程序"对话框。
-  // 走 mt.exe 后处理而不是 build.rs 嵌资源, 是因为 tauri-build 自己已经
-  // 在 ID 1 嵌了一个 manifest, 第二个 manifest 会触发 CVT1100。mt.exe
-  // -outputresource:xxx;#1 直接覆盖 ID 1 那个, 不冲突。
-  patchUpdaterManifest(builtExe);
-
-  fs.copyFileSync(builtExe, destExe);
-  const sizeMb = (fs.statSync(destExe).size / (1024 * 1024)).toFixed(2);
-  console.log(
-    `[forge:prePackage] ${UPDATER_EXE} → ${destExe} (${sizeMb} MB, ${Date.now() - t0}ms)`,
-  );
-}
-
-/**
- * 在 Windows SDK 安装目录里找 mt.exe (manifest tool)。优先用最新版 SDK 的
- * x64 版本; 找不到时给清晰的错(让构建机至少装一次 Win10 SDK)。
- */
-function findMtExe(): string {
-  const candidates = [
-    'C:\\Program Files (x86)\\Windows Kits\\10\\bin',
-    'C:\\Program Files\\Windows Kits\\10\\bin',
-  ];
-  for (const base of candidates) {
-    if (!fs.existsSync(base)) continue;
-    // 子目录形如 10.0.22621.0, 取版本号最大的
-    const versions = fs
-      .readdirSync(base)
-      .filter((d) => /^10\.\d+\.\d+\.\d+$/.test(d))
-      .sort()
-      .reverse();
-    for (const v of versions) {
-      const mt = path.join(base, v, 'x64', 'mt.exe');
-      if (fs.existsSync(mt)) return mt;
-    }
-    // 老 SDK 直接放 bin\x64 下没版本号子目录
-    const flat = path.join(base, 'x64', 'mt.exe');
-    if (fs.existsSync(flat)) return flat;
-  }
-  throw new Error(
-    '[forge] mt.exe not found. Install Windows 10/11 SDK and ensure ' +
-      '"C:\\Program Files (x86)\\Windows Kits\\10\\bin\\<ver>\\x64\\mt.exe" exists.',
-  );
-}
-
-function patchUpdaterManifest(exePath: string): void {
-  const manifestPath = path.join(__dirname, 'cindy-updater', 'src-tauri', 'cindy-updater.manifest');
-  if (!fs.existsSync(manifestPath)) {
-    throw new Error(`[forge] manifest missing at ${manifestPath}`);
-  }
-  const mt = findMtExe();
-  // -outputresource:<exe>;#1 — 替换 exe 里资源 ID 1 (RT_MANIFEST), 不新增。
-  // tauri-build 已经塞过一个默认 manifest 在 ID 1, 这步把它换成我们的版本。
-  const r = spawnSync(mt, ['-nologo', '-manifest', manifestPath, `-outputresource:${exePath};#1`], {
-    stdio: 'inherit',
-  });
-  if (r.error) throw new Error(`[forge] mt.exe spawn failed: ${r.error.message}`);
-  if (r.status !== 0) throw new Error(`[forge] mt.exe exited ${r.status} when patching manifest`);
-  console.log(`[forge:prePackage] manifest patched into ${UPDATER_EXE} (PCA bypass)`);
-}
-
-/**
  * 递归收集目录下所有 .exe 的绝对路径（目录不存在返回空数组）。用于给 node-pty
  * 这类内部布局随重编 / 版本变化的原生依赖做"按需签名"，不硬编码易漂的子路径。
  */
@@ -630,7 +515,6 @@ function signPackagedExes(buildPath: string): void {
   // 把它当未知未签名第三方进程拦下,影响"录音时静音"功能。
   const exes = [
     path.join(buildPath, `${CINDY_EXE}.exe`),
-    path.join(buildPath, 'resources', UPDATER_EXE),
     path.join(
       buildPath,
       'resources',
@@ -843,15 +727,6 @@ function extraResourcesForTarget(targetPlatform: string): string[] {
     // 非开源 / source-available / 商业条款组件单列,避免与开源包数量混淆。
     'resources/THIRD-PARTY-RESTRICTED.txt',
   ];
-
-  const windowsUpdaterRuntimeResource = windowsUpdaterRuntimeExtraResourceForTarget(targetPlatform);
-  if (windowsUpdaterRuntimeResource) {
-    base.unshift(
-      `resources/${UPDATER_EXE}`,
-      'resources/windows-installation-version.ps1',
-      windowsUpdaterRuntimeResource,
-    );
-  }
 
   // macOS 「帮助 → 安装到命令行」symlink 的目标脚本(<App>/Contents/Resources/cli/cindy)。
   // 仅 darwin 有此功能,其它平台不打进包。exec 位由 git 跟踪,extraResource 拷贝时保留。
@@ -1832,26 +1707,10 @@ if (isWin) {
         // 才会接收 toast；否则原生 Notification 被静默丢弃。
         // 值按构建区域派生(shared/brandRegion 运行时同源),见文件头身份块。
         appId: CINDY_APP_ID,
-        // 安装目录名跟随区域 exe 名(默认装到 …\Programs\<productName>):
-        // cn/global 'Cindy'(2026-07-26 显示名统一,双装同目录互抢已被 owner
-        // 接受)/ dev 'CindyDev'(仍与正式包隔离)。显式设值防 app-builder
-        // 回落 package.json productName 造成 dev 与正式包同目录。
-        productName: CINDY_EXE,
-        // Setup.exe 与 Uninstall <App>.exe 的 FileDescription 版本资源。
-        // app-builder-lib 只从 metadata(= apps/desktop/package.json)取
-        // description,没有顶层 config 字段;extraMetadata 是唯一的覆盖通道
-        // (packager.ts 在读完 package.json 后 deepAssign 进 metadata)。
-        // 不设时回落 package.json 的 npm 包描述,UAC 提权弹窗、文件属性、
-        // 快捷方式悬停提示上就会显示那段面向开发者的文本。
-        //
-        // ⚠️ 取 displayName 而非 CINDY_EXE:展示名两区(含 dev)共用 'Cindy',
-        // 而 exe 名 dev 派生为 'CindyDev'。用后者会让 dev 包的安装器显示
-        // CindyDev、装完的主 exe 却显示 Cindy(win32metadata 同样取
-        // displayName)——安装前后自相矛盾,正是本次要消除的那类不一致。
-        // 文件名层的区分由 productName / shortcutName 承担,与展示层解耦。
-        //
-        // prepackaged 模式下 doPack 直接 return,extraMetadata 不会重写
-        // 已由 electron-forge 打好的 app.asar 内 package.json。
+        // Keep the displayed product name separate from its stable executable filename.
+        productName: CINDY_DISPLAY_NAME,
+        executableName: CINDY_EXE,
+        // Installer and uninstaller metadata identify the independent privacy build.
         extraMetadata: { description: BRAND_IDENTITY.displayName },
         nsis: {
           oneClick: false,
@@ -1863,12 +1722,8 @@ if (isWin) {
           uninstallerIcon: 'resources/icon.ico',
           createDesktopShortcut: 'always',
           createStartMenuShortcut: true,
-          // 快捷方式显示名,跟随区域 exe 名(cn/global 'Cindy'——同名 .lnk
-          // 双装互抢已被 owner 接受 / dev 'CindyDev')。installer.nsh 只清理/
-          // 重建自家 .lnk——同机可能并存老 XDMaker 安装,它的 xdt-maker.lnk /
-          // XDMaker.lnk 属于老 app,绝不能删(共存红线,见 installer.nsh
-          // customInit 注释)。
-          shortcutName: CINDY_EXE,
+          // The privacy shortcut coexists with official and source-preview shortcuts.
+          shortcutName: CINDY_DISPLAY_NAME,
           runAfterFinish: true,
           include: 'resources/installer.nsh',
         },
@@ -1901,27 +1756,16 @@ const config: ForgeConfig = {
       unpack:
         '**/{@img/{sharp-libvips-*,sharp-win32-*},loudness,native/sqlite-vec,node-pty,sherpa-onnx-{darwin,win,linux}-*}/**',
     },
-    // 打包名(out 目录 / mac .app 包名 / Helper 目录名 / 主 plist CFBundleName)
-    // 按区域派生:cn/global 'Cindy'(2026-07-26 显示名统一,.app 撞名双装
-    // 互覆已被 owner 接受)/ dev 'CindyDev'(显式设值防 packager 回落
-    // package.json productName 让 dev 与正式包撞名)。mac 的 Dock/Cmd+Tab/
-    // 通知**显示名**由 postPackage 的 applyMacPackagedDisplayName 经
-    // CFBundleDisplayName 统一拉回 Cindy(对 dev 是唯一显示名来源;
-    // CFBundleName 不可动,Electron 靠它找 Helper,见该函数注释)。
+    // OS filenames are independent of the official application.
     name: CINDY_EXE,
     executableName: CINDY_EXE,
-    // mac bundle id(与 Windows AUMID 同值,按区域派生;cn/global 是两个可并存
-    // 的系统身份,与 mobile 的 com.xd.cindycn / com.xd.cindy 同一套)。
+    // The runtime, installer and notifications share this privacy app identity.
     appBundleId: CINDY_APP_ID,
-    // exe 资源元数据(任务管理器进程名、文件右键属性的显示层)。只影响展示,
-    // 与 exe 文件名 / AUMID / userData 等标识符解耦;显示层两区共用 Cindy
-    // (与 mac 显示名口径一致)。FileDescription 走 BRAND_IDENTITY.displayName,
-    // 与 NSIS maker 的 extraMetadata.description 同一表达式——安装器/卸载器
-    // 与主 exe 的「说明」字段必须同值,否则 dev 包会安装前后显示两个名字。
+    // File properties identify the privacy publisher and product.
     win32metadata: {
-      CompanyName: 'XD',
-      ProductName: 'Cindy',
-      FileDescription: BRAND_IDENTITY.displayName,
+      CompanyName: 'BestQ-A',
+      ProductName: CINDY_DISPLAY_NAME,
+      FileDescription: CINDY_DISPLAY_NAME,
     },
     icon: 'resources/icon',
     // 自定义 URL scheme: xdt-maker://session/<id> | xdt-maker://project/<encoded-workingDir>
@@ -1930,7 +1774,7 @@ const config: ForgeConfig = {
     // Windows: 不读这个字段(走 app.setAsDefaultProtocolClient 写注册表), 见
     //          main/deepLink.ts registerDeepLinkProtocol()。
     protocols: [
-      // 双 scheme 注册:cindy:// 主 + xdt-maker:// 永久兼容(存量分享链接不死)。
+      // Only the privacy protocol is registered with the OS.
       { name: 'Cindy Deep Link', schemes: [...allDeepLinkSchemes()] },
     ],
     // macOS 文件夹右键 "打开方式 → Cindy" 入口:
@@ -2068,26 +1912,10 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   hooks: {
-    // Builds cindy-updater.exe before electron-packager copies resources/ into
-    // the package — guarantees the shipped updater matches HEAD.
     prePackage: async (_forgeConfig, platform, arch) => {
       const targetPlatform = requestedTargetPlatform();
       const targetArch = requestedTargetArch();
       stageCindySourceMetadata();
-      if (targetPlatform === 'win32') {
-        if (targetArch !== 'x64') {
-          throw new Error(
-            `[forge] Windows updater app-local Runtime is x64-only; unsupported target arch: ${targetArch}`,
-          );
-        }
-        const runtimeManifest = validateBundledWindowsUpdaterRuntime(
-          path.join(__dirname, 'resources'),
-        );
-        console.log(
-          `[forge:prePackage] verified Windows updater app-local Runtime ${runtimeManifest.version} x64`,
-        );
-        buildCindyUpdater();
-      }
       stageRipgrep(targetPlatform, targetArch);
       stageAndroidPlatformTools(targetPlatform, targetArch);
       buildWindowsVoiceInputFunctionKeyListener(targetPlatform);

@@ -217,7 +217,7 @@ export function artifactRelDir({ region, version, versionless, platformKey }) {
  * 叠区域前缀。
  */
 export function artifactBaseName({ version, versionless }) {
-  return `cindy-${versionless ? 'unversioned' : version}`;
+  return `cindy-privacy-${versionless ? 'unversioned' : version}`;
 }
 
 /**

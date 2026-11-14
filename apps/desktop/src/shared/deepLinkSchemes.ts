@@ -19,8 +19,8 @@ import { BRAND_IDENTITY, allDeepLinkSchemes } from '@cindy/maker-shared/brand-id
 /** 深链主 scheme(生成侧唯一使用的 scheme)。 */
 export const DEEP_LINK_PRIMARY_SCHEME: string = BRAND_IDENTITY.primaryScheme;
 
-/** 解析 / OS 注册需要认的全部 scheme(主 + 历史),主 scheme 恒为首位。 */
-export const DEEP_LINK_SCHEMES: readonly string[] = allDeepLinkSchemes();
+/** Accepted links include official history. OS registration uses only the privacy scheme. */
+export const DEEP_LINK_SCHEMES: readonly string[] = [...allDeepLinkSchemes(), 'cindy', 'xdt-maker'];
 
 /** 生成侧 URL 前缀:`cindy://`。 */
 export const DEEP_LINK_URL_PREFIX = `${DEEP_LINK_PRIMARY_SCHEME}://`;

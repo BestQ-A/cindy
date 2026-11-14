@@ -24,10 +24,10 @@ import {
 
 describe('deepLinkSchemes constants', () => {
   it('primary scheme is cindy and legacy xdt-maker is still recognized', () => {
-    expect(DEEP_LINK_PRIMARY_SCHEME).toBe('cindy');
-    expect(DEEP_LINK_SCHEMES[0]).toBe('cindy');
+    expect(DEEP_LINK_PRIMARY_SCHEME).toBe('cindy-privacy');
+    expect(DEEP_LINK_SCHEMES[0]).toBe('cindy-privacy');
     expect(DEEP_LINK_SCHEMES).toContain('xdt-maker');
-    expect(DEEP_LINK_URL_PREFIX).toBe('cindy://');
+    expect(DEEP_LINK_URL_PREFIX).toBe('cindy-privacy://');
     expect(DEEP_LINK_URL_PREFIXES).toContain('xdt-maker://');
   });
 
@@ -108,6 +108,6 @@ describe('isDeepLinkProviderConnectId', () => {
 
 describe('buildDeepLink', () => {
   it('always generates with the primary scheme', () => {
-    expect(buildDeepLink('session/abc')).toBe('cindy://session/abc');
+    expect(buildDeepLink('session/abc')).toBe('cindy-privacy://session/abc');
   });
 });

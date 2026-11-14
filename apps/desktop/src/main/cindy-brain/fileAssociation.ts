@@ -31,16 +31,12 @@ const execFileAsync = promisify(execFile);
 const REG_TIMEOUT_MS = 5_000;
 
 /**
- * 新身份 ProgId(2026-07-17 品牌翻转:XDMaker.CindyGhost → Cindy.CindyGhost;
- * 按区域 exe 基名派生,cn/global 'Cindy.CindyGhost'——2026-07-26 显示名统一
- * 后两区同 ProgId,双装时后启动方改写 open command 已被 owner 接受 / dev
- * 'CindyDev.CindyGhost' 仍独立)。与并存的老 XDMaker 安装写的
- * `XDMaker.CindyGhost` ProgId 各自独立,互不覆盖;`.cindy` 扩展名的默认
- * handler 归后启动的那个 app(它把 KEY_EXT 默认值改写成自己的 ProgId),
- * 可接受——各 app 双击 .cindy 的行为语义一致。
+ * The privacy installation has its own ProgId and an Open With entry.
+ * The user's default .cindy handler belongs to their existing application.
  */
 const PROG_ID = `${brandExecutableName(CURRENT_CINDY_REGION)}.CindyGhost`;
 const KEY_EXT = 'HKCU\\Software\\Classes\\.cindy';
+const KEY_OPEN_WITH = `${KEY_EXT}\\OpenWithProgids`;
 const KEY_PROG = `HKCU\\Software\\Classes\\${PROG_ID}`;
 const KEY_EXT_SHARE = 'HKCU\\Software\\Classes\\.cshare';
 
@@ -62,7 +58,7 @@ async function regQuery(keyPath: string, selector: string[]): Promise<string | n
     const { stdout } = await execFileAsync('reg', ['query', keyPath, ...selector], {
       timeout: REG_TIMEOUT_MS,
     });
-    const match = stdout.match(/REG_SZ\s+(.+)$/m);
+    const match = stdout.match(/REG_(?:SZ|NONE)[ \t]*(.*)$/m);
     return match ? match[1].trim() : null;
   } catch {
     return null; // 键不存在 / reg.exe 非 0 退出 → 当作未注册
@@ -88,13 +84,15 @@ export function registerCindyFileAssociation(): void {
       const command = `"${exe}" "%1"`;
       const commandKey = `${KEY_PROG}\\shell\\open\\command`;
       const upToDate =
-        (await regQueryDefault(KEY_EXT)) === PROG_ID &&
+        (await regQueryNamed(KEY_OPEN_WITH, PROG_ID)) === '' &&
         (await regQueryDefault(commandKey)) === command &&
         (await regQueryNamed(KEY_EXT, 'Content Type')) === CINDY_MIME &&
         (await regQueryNamed(KEY_EXT_SHARE, 'Content Type')) === SHARE_MIME;
-      if (upToDate) return; // 已注册、扩展名归属自己且指向当前 exe
+      if (upToDate) return;
 
-      await regSetDefault(KEY_EXT, PROG_ID);
+      await execFileAsync('reg', ['add', KEY_OPEN_WITH, '/v', PROG_ID, '/t', 'REG_NONE', '/f'], {
+        timeout: REG_TIMEOUT_MS,
+      });
       await regSetNamed(KEY_EXT, 'Content Type', CINDY_MIME);
       await regSetDefault(KEY_PROG, 'Cindy Ghost');
       await regSetDefault(`${KEY_PROG}\\DefaultIcon`, `"${exe}",0`);

@@ -56,7 +56,6 @@ import { isValidGhostId } from '../shared/ghost';
 import { registerWindowsDeepLinkName } from './deepLinkWindowsRegistration';
 import {
   DEEP_LINK_PRIMARY_SCHEME,
-  DEEP_LINK_SCHEMES,
   DEEP_LINK_URL_PREFIX,
   isDeepLinkProviderConnectId,
   matchDeepLinkPrefix,
@@ -727,8 +726,6 @@ export function registerDeepLinkProtocol(): void {
   if (!app.isPackaged || process.argv.includes('--smoke-test')
     || process.argv.includes('--no-protocol-registration')) return;
 
-  for (const scheme of DEEP_LINK_SCHEMES) {
-    const registered = app.setAsDefaultProtocolClient(scheme);
-    if (registered) void registerWindowsDeepLinkName(scheme);
-  }
+  const registered = app.setAsDefaultProtocolClient(DEEP_LINK_PRIMARY_SCHEME);
+  if (registered) void registerWindowsDeepLinkName(DEEP_LINK_PRIMARY_SCHEME);
 }
