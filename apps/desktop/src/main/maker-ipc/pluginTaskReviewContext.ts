@@ -7,6 +7,7 @@ import {
 } from '@cindy/maker-core';
 import type { PluginTeamPlan, PluginTaskRoute } from '../../shared/pluginTasks.js';
 import { isPluginTeamPlanWithinBudget } from '../../shared/pluginTasks.js';
+import { workingDirEquals } from '../../shared/workingDir.js';
 import type { StoredAutoReviewProjection } from '../localDb/autoReviewProjection.js';
 import { restoreAutoReviewUserIntent, type AutoReviewHistoryMessage } from './autoReviewUserIntent.js';
 
@@ -87,7 +88,7 @@ export function createPluginTaskReviewResolver(
     ) {
       return denied('Worker does not match the active registered plan.');
     }
-    if (request.workspaceRoots[0] !== snapshot.session.workingDir)
+    if (!workingDirEquals(request.workspaceRoots[0], snapshot.session.workingDir, { windows: request.platform === 'win32' }))
       return denied('Task working directory changed.');
     // Missing scope does not turn a recognized plugin task into an ordinary task.
     if (typeof task !== 'string' || !task.trim() || task.length > 8000)

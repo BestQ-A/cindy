@@ -3,7 +3,7 @@ import { createWireNoteMemory } from '../wireNoteMemory.js';
 import { DEFAULT_CLASSICAL_REPLY_STYLE } from '@cindy/maker-shared/classical-reply';
 import { bindTaskActionInput } from '../taskActionAuthorization.js';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, win32 } from 'node:path';
 import ts from 'typescript';
 import { expect, it, vi } from 'vitest';
 import { appendAutoReviewUserIntent, ASYNC_QUESTION_ANSWER, SUPERSEDE_ASYNC_QUESTIONS, AUTO_REVIEW_DELEGATED_CONTINUATION, AUTO_REVIEW_SOURCE_CONTENT, AUTO_REVIEW_USER_INTENT, MAIN_OWNED_SEND_CONTEXT, type SendOptions } from '@cindy/maker-core';
@@ -16,7 +16,7 @@ import { captureAgentRequest } from '../forwardedRequest.js';
 import { restoreAutoReviewUserIntent, type AutoReviewHistoryMessage } from '../autoReviewUserIntent.js';
 import { AgentInputCoordinator } from '../agent-input-coordinator.desktop.js';
 import { createPluginTargetReviewLoader } from '../../cindy-brain/pluginTargetReview.js';
-import { createPluginTaskReviewResolver } from '../pluginTaskReviewContext.js';
+import { createPluginTaskReviewResolver, type PluginReviewSnapshot } from '../pluginTaskReviewContext.js';
 
 const source = readFileSync(resolve(__dirname, '..', 'register.ts'), 'utf8');
 const compile = (code: string) => ts.transpileModule(code, {
@@ -107,6 +107,43 @@ it.each([false, true])('preserves target scope through accepted delivery (delega
   } else {
     expect(result.delegatedTask).toBeUndefined();
     expect(result.userIntent).toEqual({ earlierUserMessages: ['Do not publish.'], currentUserMessage: text });
+  }
+});
+
+// Unit regression: the accepted target is stored with forward slashes while
+// Windows tools report native cwd spelling. Earlier coverage used /answer on
+// both sides and missed the false "working directory changed" rejection.
+const windowsWorkspace = win32.join('C:\\', 'Users', 'Owner', 'Workspace');
+const storedWindowsWorkspace = 'C:/Users/Owner/Workspace'; // Storage protocol spelling.
+it.each([
+  { name: 'Windows separators', stored: storedWindowsWorkspace, roots: [windowsWorkspace], platform: 'win32', allowed: true },
+  { name: 'Windows case', stored: storedWindowsWorkspace, roots: [windowsWorkspace.toUpperCase()], platform: 'win32', allowed: true },
+  { name: 'Windows long-path prefix', stored: storedWindowsWorkspace, roots: [win32.toNamespacedPath(windowsWorkspace)], platform: 'win32', allowed: true },
+  { name: 'different Windows directory', stored: storedWindowsWorkspace, roots: [win32.join(windowsWorkspace, 'other')], platform: 'win32', allowed: false },
+  { name: 'missing workspace root', stored: storedWindowsWorkspace, roots: [], platform: 'win32', allowed: false },
+  { name: 'empty workspace root', stored: storedWindowsWorkspace, roots: [''], platform: 'win32', allowed: false },
+  { name: 'POSIX case difference', stored: '/answer', roots: ['/ANSWER'], platform: 'linux', allowed: false },
+  { name: 'POSIX literal backslash', stored: '/answer/a/b', roots: ['/answer/a\\b'], platform: 'linux', allowed: false },
+] as const)('checks delegated task workspace identity: $name', async ({ stored, roots, platform, allowed }) => {
+  const route = { agentKind: 'codex' as const, providerId: 'p', model: 'm', effort: 'high', fastMode: false };
+  const history: AutoReviewHistoryMessage[] = [{ clientId: 'human', role: 'user', content: 'Do not publish.', createdAt: 1,
+    agentMeta: { delivery: 'turn', autoReviewUserText: 'Do not publish.' } }];
+  const snapshot: PluginReviewSnapshot = {
+    pluginId: 'p', authorized: true, revision: 1, registeredRoute: route,
+    plan: { task: 'Read the requested role file.', concurrency: 1, items: [] },
+    session: { workingDir: stored, permissionMode: 'auto', status: 'active', route },
+    lead: { permissionMode: 'auto', status: 'active' },
+    history, sessionHistory: history, historyComplete: true,
+  };
+  const review = createPluginTaskReviewResolver(async () => snapshot);
+  const result = await review({ sessionId: 'task', agentKind: 'codex', model: 'm', userIntent: 'Do not publish.',
+    workspaceRoots: [...roots], platform, action: { kind: 'exec', command: 'read role file', cwd: stored } });
+  if (allowed) {
+    expect(result.authorizationError).toBeUndefined();
+    expect(result.delegatedTask?.task).toBe(snapshot.plan?.task);
+  } else {
+    expect(result.authorizationError).toBe('Task working directory changed.');
+    expect(result.delegatedTask).toBeUndefined();
   }
 });
 
