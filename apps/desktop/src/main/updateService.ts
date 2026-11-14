@@ -25,6 +25,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { isCindyPersonalRuntime } from './cindy-make/versionRuntimeIdentity.js';
+import { APP_UPDATES_ENABLED } from '../shared/appUpdatePolicy';
 import os from 'node:os';
 
 import {
@@ -356,9 +357,9 @@ function ensureWindowsUpdaterPrerequisites(options?: {
 function autoUpdateSettingsWire() {
   const state = readAutoUpdateSettingsState();
   return {
-    autoRelaunchOnIdle: state.value.autoRelaunchOnIdle,
+    autoRelaunchOnIdle: APP_UPDATES_ENABLED && state.value.autoRelaunchOnIdle,
     isCustomized: state.isCustomized,
-    defaultAutoRelaunchOnIdle: state.defaults.autoRelaunchOnIdle,
+    defaultAutoRelaunchOnIdle: APP_UPDATES_ENABLED && state.defaults.autoRelaunchOnIdle,
   };
 }
 
@@ -390,6 +391,7 @@ async function hasBusyTasks(): Promise<boolean> {
 }
 
 async function getAutoRelaunchBlockReasonForCurrentState(): Promise<AutoRelaunchBlockReason | null> {
+  if (!APP_UPDATES_ENABLED) return 'disabled';
   if (!readAutoUpdateSettings().autoRelaunchOnIdle) return 'disabled';
   if (isDev()) return 'dev';
   if (currentStatus !== 'ready') return 'not-ready';
@@ -439,6 +441,7 @@ async function getAutoRelaunchBlockReasonForCurrentState(): Promise<AutoRelaunch
  * full policy via getAutoRelaunchBlockReasonForCurrentState.)
  */
 async function getStartupRelaunchBlockReason(): Promise<AutoRelaunchBlockReason | null> {
+  if (!APP_UPDATES_ENABLED) return 'disabled';
   if (isDev()) return 'dev';
   if (currentStatus !== 'ready') return 'not-ready';
   if (lastErrorCode === WINDOWS_UPDATER_RUNTIME_MISSING_ERROR_CODE) return 'not-ready';
@@ -624,6 +627,7 @@ export function getUpdateStatus(): UpdateStatus {
  * goes idle, and the following cold boot is up to date and ungated.
  */
 export function isUpdateRelaunchImminent(): boolean {
+  if (!APP_UPDATES_ENABLED) return false;
   // Already committed — the updater is spawning / windows are tearing down.
   if (isRelaunching || autoRelaunchInProgress) return true;
   // Nothing staged or being staged can relaunch us.
@@ -715,7 +719,7 @@ function checkExistingPatch(): {
   version?: string;
   targetArch?: string;
 } {
-  if (isCindyPersonalRuntime()) return { action: 'none' };
+  if (!APP_UPDATES_ENABLED || isCindyPersonalRuntime()) return { action: 'none' };
   const updatesDir = getUpdatesDir();
   const infoPath = path.join(updatesDir, PATCH_INFO_FILE);
 
@@ -1168,6 +1172,7 @@ export function isVersionlessAppVersion(version: string): boolean {
 }
 
 async function doCheckForUpdate(manifestOverride?: Manifest | null): Promise<CheckForUpdateResult> {
+  if (!APP_UPDATES_ENABLED) return 'manual_download';
   if (isCindyPersonalRuntime()) return 'idle';
   log.info('checkForUpdate() called, currentStatus=%s', currentStatus);
   // 先跟共享设置对一次有效渠道:共库另一实例改过开关时,本进程内存代际还停在旧值。
@@ -1974,7 +1979,7 @@ interface RelaunchOptions {
 }
 
 async function executeRelaunch(theme: 'light' | 'dark', options?: RelaunchOptions): Promise<void> {
-  if (isCindyPersonalRuntime()) return;
+  if (!APP_UPDATES_ENABLED || isCindyPersonalRuntime()) return;
   try {
     await executeRelaunchUnguarded(theme, options);
   } catch (err) {
@@ -2188,6 +2193,7 @@ function agentUpdateApplyBlockReason(): string | null {
 
 /** Build and installation blockers shared by every Agent-facing update entry. */
 function agentUpdateUnsupportedReason(): string | null {
+  if (!APP_UPDATES_ENABLED) return 'Cindy Privacy 通过维护者提供的独立安装包手动更新。';
   if (!app.isPackaged || isDev() || isCindyPersonalRuntime() || isVersionlessAppVersion(app.getVersion())) {
     return '此构建不支持应用内更新。';
   }
@@ -2358,11 +2364,12 @@ export async function applyConfirmedAppUpdateForAgent(options: {
 
 /** Effective idle auto-install switch (Settings → About), shared with the Agent tools. */
 export function readAutoRelaunchOnIdleForAgent(): boolean {
-  return readAutoUpdateSettings().autoRelaunchOnIdle;
+  return APP_UPDATES_ENABLED && readAutoUpdateSettings().autoRelaunchOnIdle;
 }
 
 /** Same write as the Settings toggle IPC; only called after the user confirmed the Host card. */
 export function setAutoRelaunchOnIdleForAgent(enabled: boolean): boolean {
+  if (!APP_UPDATES_ENABLED) return false;
   writeAutoRelaunchOnIdle(enabled);
   void evaluateAutoRelaunch('agent-settings-set');
   return readAutoUpdateSettings().autoRelaunchOnIdle;
@@ -2371,7 +2378,7 @@ export function setAutoRelaunchOnIdleForAgent(enabled: boolean): boolean {
 export function initUpdateService(): void {
   // Observe the successful old-updater receipt before existing cleanup removes
   // it. Async and metadata-only; no effect on download/apply/rollback decisions.
-  if (process.platform === 'win32' && app.isPackaged && !isDev() && !isCindyPersonalRuntime()) {
+  if (APP_UPDATES_ENABLED && process.platform === 'win32' && app.isPackaged && !isDev() && !isCindyPersonalRuntime()) {
     void syncWindowsVersionAfterUpdate({
       platform: process.platform,
       packaged: true,
@@ -2386,7 +2393,7 @@ export function initUpdateService(): void {
   // Best-effort cleanup of >7-day-old `cindy-update*`/`xdt-update*` leftovers in %TEMP%.
   // Counterpart to the Rust updater's own sweep — covers the case where the
   // user stays on the latest version and never triggers another updater run.
-  if (!isCindyPersonalRuntime()) sweepStaleUpdateTempDirs();
+  if (APP_UPDATES_ENABLED && !isCindyPersonalRuntime()) sweepStaleUpdateTempDirs();
 
   ipcMain.on('update-relaunch', (event, theme: 'light' | 'dark') => {
     // Linux 分支会退出应用并触发 pkexec 系统授权,属于特权操作;
@@ -2607,6 +2614,7 @@ export function initUpdateService(): void {
   });
 
   ipcMain.handle('update-check-now', async (): Promise<{ result: CheckForUpdateResult | 'downloading' }> => {
+    if (!APP_UPDATES_ENABLED) return { result: 'manual_download' };
     // Short-circuit when a check / download is already in flight or finished:
     // we don't want the user to wait for an entire download just to see the
     // toast, and re-entering checkForUpdate() during 'downloading' would
@@ -2624,7 +2632,7 @@ export function initUpdateService(): void {
     log.info('update-check-startup called');
     startupUpdateCheckInProgress = true;
     try {
-      if (isDev() || isCindyPersonalRuntime()) {
+      if (!APP_UPDATES_ENABLED || isDev() || isCindyPersonalRuntime()) {
         return { hasUpdate: false, action: 'none' as const };
       }
 
@@ -2774,8 +2782,8 @@ export function initUpdateService(): void {
     }
   });
 
-  if (isDev() || isCindyPersonalRuntime()) {
-    log.info('Dev mode — skipping background polling');
+  if (!APP_UPDATES_ENABLED || isDev() || isCindyPersonalRuntime()) {
+    log.info('Application updates disabled for this build — skipping background polling');
     return;
   }
 

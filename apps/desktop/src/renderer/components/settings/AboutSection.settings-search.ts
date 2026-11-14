@@ -24,11 +24,9 @@ export const aboutSettings = defineSettings({
     fallbackTargetId: 'settings-panel-about',
     tab: 'about',
     targetId: 'settings-search-settings-about-autoUpdateLabel',
-    titleKey: 'settings.about.autoUpdateLabel',
-    descriptionKey: 'settings.about.autoUpdateDescription',
-    descriptionKeyForContext: ({ platform }) => platform === 'linux'
-      ? 'settings.about.linuxUpdateDescription' : undefined,
-    aliases: ['自动更新', '自动升级', 'auto update'],
+    titleKey: 'settings.about.privacyUpdateLabel',
+    descriptionKey: 'settings.about.privacyUpdateDescription',
+    aliases: ['自动更新', '手动更新', '应用更新', 'auto update', 'manual update'],
     sectionKey: 'settings.tabs.about',
   },
   debugLogLabel: {

@@ -2749,6 +2749,9 @@
         "unavailableNoConsent": "Du musst zuerst die Datenschutzerklärung akzeptieren."
       },
       "openLogsDirError": "Protokollverzeichnis konnte nicht geöffnet werden",
+      "privacyUpdateLabel": "App-Updates",
+      "privacyUpdateDescription": "Cindy Privacy wird manuell mit Installationspaketen des Maintainers aktualisiert.",
+      "privacyUpdateSource": "Quellcode öffnen",
       "autoUpdateLabel": "Updates bei Inaktivität installieren",
       "autoUpdateDescription": "Nach dem Herunterladen eines Updates die App zur Installation neu starten, wenn dieser Computer seit 10 Minuten inaktiv ist und keine Aufgaben ausgeführt werden.",
       "linuxUpdateDescription": "Updates erfordern einen von dir gewählten Neustart. Systemweite .deb-Installationen fragen nach deinem Systempasswort; verwaltete Benutzerinstallationen nicht. Andere Installationen verwenden ihren Paketmanager.",
@@ -9731,7 +9734,7 @@
       "ready": "Neue Version bereit — zum Anwenden auf die Seitenleiste klicken",
       "manifestFailed": "Update-Prüfung fehlgeschlagen. Prüfe deine Netzwerkverbindung",
       "downloadFailed": "Download der neuen Version fehlgeschlagen. Versuch es später erneut",
-      "manualDownload": "Lade das Update in der App herunter und wähle selbst, wann du neu startest. Nur systemweite .deb-Installationen erfordern ein Systempasswort."
+      "manualDownload": "Cindy Privacy wird manuell aktualisiert. Den Projektquellcode finden Sie unter Einstellungen → Über."
     },
     "closeConfirm": {
       "title": "Wirklich beenden?",

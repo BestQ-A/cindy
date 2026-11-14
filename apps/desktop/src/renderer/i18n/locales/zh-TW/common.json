@@ -2719,6 +2719,9 @@
         "unavailableNoConsent": "需要先同意《隱私政策》。"
       },
       "openLogsDirError": "開啟日誌目錄失敗",
+      "privacyUpdateLabel": "應用程式更新",
+      "privacyUpdateDescription": "Cindy Privacy 使用維護者提供的獨立安裝套件手動更新。",
+      "privacyUpdateSource": "檢視原始碼",
       "autoUpdateLabel": "空閒時自動安裝更新",
       "autoUpdateDescription": "更新下載完成後，當這臺電腦 10 分鐘無操作且沒有任務執行時，自動重啟應用完成安裝。",
       "linuxUpdateDescription": "更新在你選擇重新啟動時生效。系統 .deb 安裝需要系統密碼，使用者目錄安裝不需要。其他安裝方式請透過對應套件管理器更新。",
@@ -9688,7 +9691,7 @@
       "ready": "新版本已就緒，點選側邊欄完成更新",
       "manifestFailed": "檢查更新失敗，請檢查網路",
       "downloadFailed": "新版本下載失敗，稍後再試",
-      "manualDownload": "在應用程式內下載，再選擇重新啟動時間。只有系統 .deb 安裝需要系統密碼。"
+      "manualDownload": "Cindy Privacy 透過獨立安裝套件手動更新，可在設定 → 關於檢視專案原始碼。"
     },
     "closeConfirm": {
       "title": "確認要離開嗎？",

@@ -2719,6 +2719,9 @@
         "unavailableNoConsent": "需要先同意《隐私政策》。"
       },
       "openLogsDirError": "打开日志目录失败",
+      "privacyUpdateLabel": "应用更新",
+      "privacyUpdateDescription": "Cindy Privacy 使用维护者提供的独立安装包手动更新。",
+      "privacyUpdateSource": "查看源码",
       "autoUpdateLabel": "空闲时自动安装更新",
       "autoUpdateDescription": "更新下载完成后，当这台电脑 10 分钟无操作且没有任务运行时，自动重启应用完成安装。",
       "linuxUpdateDescription": "更新在你选择重启时生效。系统 .deb 安装需要系统密码，用户目录安装不需要。其他安装方式请通过对应包管理器更新。",
@@ -9688,7 +9691,7 @@
       "ready": "新版本已就绪，点击侧边栏完成更新",
       "manifestFailed": "检查更新失败，请检查网络",
       "downloadFailed": "新版本下载失败，稍后再试",
-      "manualDownload": "在应用内下载，再选择重启时间。只有系统 .deb 安装需要系统密码。"
+      "manualDownload": "Cindy Privacy 通过独立安装包手动更新，可在设置 → 关于查看项目源码。"
     },
     "closeConfirm": {
       "title": "确认要离开吗？",

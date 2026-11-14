@@ -2787,6 +2787,9 @@
         "unavailableNoConsent": "Vous devez d'abord accepter la Politique de confidentialité."
       },
       "openLogsDirError": "Impossible d'ouvrir le répertoire des journaux",
+      "privacyUpdateLabel": "Mises à jour de l’application",
+      "privacyUpdateDescription": "Cindy Privacy se met à jour manuellement avec les programmes d’installation fournis par son responsable.",
+      "privacyUpdateSource": "Voir le code source",
       "autoUpdateLabel": "Installer les mises à jour en période d'inactivité",
       "autoUpdateDescription": "Une fois une mise à jour téléchargée, l'application redémarre pour l'installer lorsque cet ordinateur est inactif depuis 10 minutes et qu'aucune tâche n'est en cours d'exécution.",
       "linuxUpdateDescription": "Les mises à jour nécessitent un redémarrage que vous déclenchez. Les installations .deb système demandent votre mot de passe système ; les installations utilisateur gérées, non. Les autres installations utilisent leur gestionnaire de paquets.",
@@ -9804,7 +9807,7 @@
       "ready": "Nouvelle version prête : cliquez dans la barre latérale pour l'appliquer",
       "manifestFailed": "Échec de la recherche de mises à jour, vérifiez votre réseau",
       "downloadFailed": "Échec du téléchargement de la nouvelle version, réessayez plus tard",
-      "manualDownload": "Téléchargez dans l'application, puis choisissez quand redémarrer. Seules les installations système .deb nécessitent un mot de passe système."
+      "manualDownload": "Cindy Privacy se met à jour manuellement. Consultez le code source dans Paramètres → À propos."
     },
     "closeConfirm": {
       "title": "Confirmer la fermeture ?",

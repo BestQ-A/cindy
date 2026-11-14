@@ -2719,6 +2719,9 @@
         "unavailableNoConsent": "먼저 「개인정보 처리방침」에 동의해야 합니다."
       },
       "openLogsDirError": "로그 디렉터리를 열지 못했습니다",
+      "privacyUpdateLabel": "앱 업데이트",
+      "privacyUpdateDescription": "Cindy Privacy는 관리자가 제공하는 별도 설치 파일로 수동 업데이트합니다.",
+      "privacyUpdateSource": "소스 보기",
       "autoUpdateLabel": "유휴 상태일 때 업데이트 설치",
       "autoUpdateDescription": "업데이트 다운로드가 완료된 뒤, 이 컴퓨터가 10분 동안 조작되지 않았고 실행 중인 작업이 없으면 앱을 자동으로 다시 시작해 설치합니다.",
       "linuxUpdateDescription": "재시작을 선택하면 업데이트가 적용됩니다. 시스템 .deb 설치에는 시스템 비밀번호가 필요하지만 사용자 설치에는 필요하지 않습니다. 다른 설치 방식은 패키지 관리자를 사용하세요.",
@@ -9688,7 +9691,7 @@
       "ready": "새 버전 준비 완료 — 사이드바를 클릭해 업데이트 완료",
       "manifestFailed": "업데이트 확인 실패, 네트워크를 확인하세요",
       "downloadFailed": "새 버전 다운로드 실패, 나중에 다시 시도하세요",
-      "manualDownload": "앱에서 다운로드한 뒤 재시작할 때를 선택하세요. 시스템 .deb 설치에만 시스템 비밀번호가 필요합니다."
+      "manualDownload": "Cindy Privacy는 수동으로 업데이트합니다. 설정 → 정보에서 프로젝트 소스를 확인하세요."
     },
     "closeConfirm": {
       "title": "정말 나가시겠습니까?",

@@ -32,6 +32,10 @@ const appGetPath = vi.fn((name: string) => {
 const fetchManifest = vi.fn();
 const getBaseUrl = vi.fn(() => CDN_EXTERNAL_BASE_URL);
 const isDev = vi.fn(() => false);
+let appUpdatesEnabled = true;
+vi.mock('../../shared/appUpdatePolicy', () => ({
+  get APP_UPDATES_ENABLED() { return appUpdatesEnabled; },
+}));
 const syncWindowsVersionAfterUpdate = vi.fn(async () => undefined);
 const download = vi.fn();
 const prefetchAgentBinary = vi.fn(async () => true);
@@ -228,6 +232,7 @@ afterAll(() => {
   fs.rmSync(TEST_ROOT, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 });
 beforeEach(() => {
+  appUpdatesEnabled = true;
   // Own every startup/background timer so afterEach can cancel it before the
   // app.getPath mock starts pointing at the next test's isolated fixture.
   vi.useFakeTimers();
@@ -541,7 +546,7 @@ describe('agent-facing managed app update check', () => {
       const service = await freshUpdateService('win32');
       const resourcesPath = path.join(TEST_ROOT, 'resources');
       fs.mkdirSync(resourcesPath, { recursive: true });
-      fs.writeFileSync(path.join(resourcesPath, 'cindy-updater.exe'), 'updater');
+      fs.writeFileSync(path.join(resourcesPath, 'cindy-privacy-updater.exe'), 'updater');
       const resourcesDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
       Object.defineProperty(process, 'resourcesPath', { value: resourcesPath, configurable: true });
       const tmpdirSpy = vi.spyOn(os, 'tmpdir').mockReturnValue(TEST_ROOT);
@@ -853,7 +858,7 @@ describe('binary version checks after an applied update', () => {
     const service = await freshUpdateService('win32');
     const resourcesPath = path.join(TEST_ROOT, 'resources');
     fs.mkdirSync(resourcesPath, { recursive: true });
-    fs.writeFileSync(path.join(resourcesPath, 'cindy-updater.exe'), 'updater');
+    fs.writeFileSync(path.join(resourcesPath, 'cindy-privacy-updater.exe'), 'updater');
     const resourcesDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
     Object.defineProperty(process, 'resourcesPath', { value: resourcesPath, configurable: true });
     const tmpdirSpy = vi.spyOn(os, 'tmpdir').mockReturnValue(TEST_ROOT);
@@ -890,7 +895,7 @@ describe('binary version checks after an applied update', () => {
     const service = await freshUpdateService('win32');
     const resourcesPath = path.join(TEST_ROOT, 'resources');
     fs.mkdirSync(resourcesPath, { recursive: true });
-    fs.writeFileSync(path.join(resourcesPath, 'cindy-updater.exe'), 'installed updater');
+    fs.writeFileSync(path.join(resourcesPath, 'cindy-privacy-updater.exe'), 'installed updater');
     const resourcesDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
     Object.defineProperty(process, 'resourcesPath', { value: resourcesPath, configurable: true });
     const tmpdirSpy = vi.spyOn(os, 'tmpdir').mockReturnValue(TEST_ROOT);
@@ -1331,6 +1336,84 @@ describe('checkForUpdate 版本无关(占位 0.0.0)打包豁免', () => {
     expect(service.isVersionlessAppVersion('0.0.0-dev')).toBe(true);
     expect(service.isVersionlessAppVersion('0.0.1')).toBe(false);
     expect(service.isVersionlessAppVersion('1.0.0')).toBe(false);
+  });
+});
+
+describe('privacy build app update policy', () => {
+  beforeEach(async () => {
+    const policy = await vi.importActual<typeof import('../../shared/appUpdatePolicy')>('../../shared/appUpdatePolicy');
+    appUpdatesEnabled = policy.APP_UPDATES_ENABLED;
+    appGetVersion.mockReturnValue('0.1.136');
+  });
+
+  it('keeps a packaged startup idle with a pending official update on disk', async () => {
+    const updatesDir = path.join(TEST_USER_DATA, 'updates');
+    fs.mkdirSync(updatesDir, { recursive: true });
+    const patchPath = path.join(updatesDir, 'patch-info.json');
+    const pendingPatch = JSON.stringify({ version: '9.9.9', fileName: 'official.zip', sha256: 'abc' });
+    fs.writeFileSync(path.join(updatesDir, 'official.zip'), 'official update');
+    fs.writeFileSync(patchPath, pendingPatch);
+    const service = await freshUpdateService('win32');
+    service.initUpdateService();
+    try {
+      const startup = ipcHandlers.get('update-check-startup');
+      if (!startup) throw new Error('Startup handler is missing');
+      expect(await startup()).toMatchObject({ hasUpdate: false, action: 'none' });
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+      expect(service.getUpdateStatus()).toBe('idle');
+      expect(fs.readFileSync(patchPath, 'utf8')).toBe(pendingPatch);
+      expect(fetchManifest).not.toHaveBeenCalled();
+      expect(download).not.toHaveBeenCalled();
+      expect(spawnProcess).not.toHaveBeenCalled();
+      expect(syncWindowsVersionAfterUpdate).not.toHaveBeenCalled();
+    } finally {
+      service.stopUpdateService();
+    }
+  });
+
+  it('directs manual checks to manual installation without downloading a supplied manifest', async () => {
+    const service = await freshUpdateService('win32');
+    expect(await service.checkForUpdate(updateManifest('9.9.9'))).toBe('manual_download');
+    expect(fetchManifest).not.toHaveBeenCalled();
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it('blocks an already staged updater at the final relaunch boundary', async () => {
+    const service = await freshUpdateService('win32');
+    service.initUpdateService();
+    try {
+      appUpdatesEnabled = true;
+      readAutoUpdateSettings.mockReturnValue({ autoRelaunchOnIdle: false });
+      download.mockImplementation(async ({ targetPath }: { targetPath: string }) => {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.writeFileSync(targetPath, 'update');
+        return { path: targetPath, size: 123 };
+      });
+      expect(await service.checkForUpdate(updateManifest('9.9.9'))).toBe('ready');
+      const policy = await vi.importActual<typeof import('../../shared/appUpdatePolicy')>('../../shared/appUpdatePolicy');
+      appUpdatesEnabled = policy.APP_UPDATES_ENABLED;
+      const relaunch = ipcListeners.get('update-relaunch');
+      if (!relaunch) throw new Error('Relaunch listener is missing');
+      relaunch({}, 'dark');
+      await Promise.resolve();
+      expect(spawnProcess).not.toHaveBeenCalled();
+      expect(appQuit).not.toHaveBeenCalled();
+      expect(service.isUpdateRelaunchImminent()).toBe(false);
+    } finally {
+      service.stopUpdateService();
+    }
+  });
+
+  it('rejects Agent installation and reports auto-install disabled despite stored opt-in', async () => {
+    const service = await freshUpdateService('win32');
+    expect(await service.checkAppUpdateForAgent()).toMatchObject({ status: 'unsupported' });
+    expect(await service.applyConfirmedAppUpdateForAgent({ beforeRelaunch: async () => true }))
+      .toMatchObject({ status: 'failed', errorCode: 'unsupported' });
+    expect(service.readAutoRelaunchOnIdleForAgent()).toBe(false);
+    expect(service.setAutoRelaunchOnIdleForAgent(true)).toBe(false);
+    expect(fetchManifest).not.toHaveBeenCalled();
+    expect(download).not.toHaveBeenCalled();
+    expect(spawnProcess).not.toHaveBeenCalled();
   });
 });
 
@@ -2707,7 +2790,7 @@ describe('Windows updater prerequisites', () => {
 
     const resourcesPath = path.join(TEST_ROOT, 'resources');
     fs.mkdirSync(resourcesPath, { recursive: true });
-    fs.writeFileSync(path.join(resourcesPath, 'cindy-updater.exe'), 'updater');
+    fs.writeFileSync(path.join(resourcesPath, 'cindy-privacy-updater.exe'), 'updater');
     const resourcesPathDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
     Object.defineProperty(process, 'resourcesPath', {
       value: resourcesPath,

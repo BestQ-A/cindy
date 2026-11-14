@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { supportsBetaUpdateChannel } from '../../../../shared/updateChannelCapability';
 
@@ -40,7 +40,7 @@ vi.mock('../BetaChannelCell', () => ({
   BetaChannelCell: () => <div>beta-channel-cell</div>,
 }));
 
-import { AutoUpdateToggleRow } from '../AboutSection';
+import { AppUpdateRow } from '../AboutSection';
 import { ExperimentalSection } from '../ExperimentalSection';
 import { HelpSection } from '../HelpSection';
 
@@ -58,22 +58,25 @@ describe('Linux update settings', () => {
     };
   });
 
-  it('explains in-app .deb updates instead of showing the idle-install switch', () => {
-    render(<AutoUpdateToggleRow />);
+  it.each(['win32', 'darwin', 'linux'])('offers manual privacy updates on %s', (platform) => {
+    (window as unknown as { electronAPI: { platform: string } }).electronAPI = {
+      platform,
+    };
+    render(<AppUpdateRow />);
 
-    expect(screen.getByText('settings.about.autoUpdateLabel')).toBeTruthy();
-    expect(screen.getByText('settings.about.linuxUpdateDescription')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'settings.about.privacyUpdateSource' })).toBeTruthy();
     expect(screen.queryByRole('switch')).toBeNull();
+    expect(screen.queryByText('settings.about.linuxUpdateDescription')).toBeNull();
   });
 
-  it('keeps the idle-install switch on macOS', () => {
-    (window as unknown as { electronAPI: { platform: string } }).electronAPI = {
-      platform: 'darwin',
-    };
-    render(<AutoUpdateToggleRow />);
+  it('opens the maintained privacy branch from the update action', () => {
+    const openExternal = vi.fn(async () => ({ success: true }));
+    Object.assign(window.electronAPI, { openExternal });
+    render(<AppUpdateRow />);
 
-    expect(screen.getByRole('switch', { name: 'settings.about.autoUpdateLabel' })).toBeTruthy();
-    expect(screen.queryByText('settings.about.linuxUpdateDescription')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'settings.about.privacyUpdateSource' }));
+
+    expect(openExternal).toHaveBeenCalledWith('https://github.com/BestQ-A/cindy/tree/privacy/no-telemetry');
   });
 
   // Exercise the shared capability consumed by preload and the real settings

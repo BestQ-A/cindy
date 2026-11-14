@@ -2787,6 +2787,9 @@
         "unavailableNoConsent": "Você precisa aceitar a Política de Privacidade primeiro."
       },
       "openLogsDirError": "Não foi possível abrir o diretório de logs",
+      "privacyUpdateLabel": "Atualizações do aplicativo",
+      "privacyUpdateDescription": "O Cindy Privacy é atualizado manualmente com os instaladores fornecidos pelo responsável do projeto.",
+      "privacyUpdateSource": "Ver código-fonte",
       "autoUpdateLabel": "Instalar atualizações durante a inatividade",
       "autoUpdateDescription": "Após o download de uma atualização, reiniciar o aplicativo para instalá-la quando este computador estiver inativo por 10 minutos e não houver tarefas em execução.",
       "linuxUpdateDescription": "As atualizações exigem uma reinicialização escolhida por você. Instalações .deb do sistema solicitam sua senha do sistema; instalações gerenciadas por usuário não. Outras instalações usam seu gerenciador de pacotes.",
@@ -9804,7 +9807,7 @@
       "ready": "Nova versão pronta — clique na barra lateral para aplicar",
       "manifestFailed": "Falha ao verificar atualizações. Verifique sua conexão",
       "downloadFailed": "Falha ao baixar a nova versão. Tente novamente mais tarde",
-      "manualDownload": "Baixe no aplicativo e depois escolha quando reiniciar. Apenas instalações .deb do sistema exigem uma senha do sistema."
+      "manualDownload": "O Cindy Privacy é atualizado manualmente. Consulte o código-fonte em Configurações → Sobre."
     },
     "closeConfirm": {
       "title": "Confirmar saída?",

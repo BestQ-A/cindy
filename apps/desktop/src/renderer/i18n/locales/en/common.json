@@ -2749,6 +2749,9 @@
         "unavailableNoConsent": "You need to accept the Privacy Policy first."
       },
       "openLogsDirError": "Failed to open logs directory",
+      "privacyUpdateLabel": "Application updates",
+      "privacyUpdateDescription": "Cindy Privacy uses manual installation packages from its maintainer.",
+      "privacyUpdateSource": "Open source",
       "autoUpdateLabel": "Install updates while idle",
       "autoUpdateDescription": "After an update finishes downloading, restart the app to install it when this computer has been idle for 10 minutes and no tasks are running.",
       "linuxUpdateDescription": "Updates require a restart you choose. System .deb installs request your system password; managed user installs do not. Other installations use their package manager.",
@@ -9731,7 +9734,7 @@
       "ready": "New version ready — click the sidebar to apply",
       "manifestFailed": "Update check failed, please check your network",
       "downloadFailed": "New version download failed, try again later",
-      "manualDownload": "Download in the app, then choose when to restart. Only system .deb installs require a system password."
+      "manualDownload": "Cindy Privacy updates are installed manually. See the project source in Settings → About."
     },
     "closeConfirm": {
       "title": "Confirm exit?",

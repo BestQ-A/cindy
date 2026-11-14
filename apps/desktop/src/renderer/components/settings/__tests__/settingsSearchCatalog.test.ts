@@ -251,7 +251,6 @@ describe('settings discoverability regressions', () => {
   it.each(['linux', 'win32', 'darwin'])('indexes the visible platform descriptions on %s', (platform) => {
     const documents = buildSettingsSearchDocuments(searchI18n.t, TAB_IDS, { ...searchContext, platform });
     for (const [id, standardKey, linuxKey] of [
-      ['settings.about.autoUpdateLabel', 'settings.about.autoUpdateDescription', 'settings.about.linuxUpdateDescription'],
       ['settings.voiceInput.shortcut.label', 'settings.voiceInput.shortcut.hint', 'settings.voiceInput.shortcut.linuxUnsupported'],
     ]) {
       for (const lng of ['zh-CN', 'en']) {
@@ -260,6 +259,15 @@ describe('settings discoverability regressions', () => {
         expect(searchSettings(documents, searchI18n.t(visibleKey, { lng })).map(({ entry }) => entry.id)).toContain(id);
         expect(searchSettings(documents, searchI18n.t(hiddenKey, { lng })).map(({ entry }) => entry.id)).not.toContain(id);
       }
+    }
+  });
+
+  it.each(['linux', 'win32', 'darwin'])('indexes manual privacy updates on %s', (platform) => {
+    const documents = buildSettingsSearchDocuments(searchI18n.t, TAB_IDS, { ...searchContext, platform });
+    for (const lng of ['zh-CN', 'en']) {
+      const description = searchI18n.t('settings.about.privacyUpdateDescription', { lng });
+      expect(searchSettings(documents, description).map(({ entry }) => entry.id))
+        .toContain('settings.about.autoUpdateLabel');
     }
   });
 

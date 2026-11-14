@@ -2719,6 +2719,9 @@
         "unavailableNoConsent": "須先允《隱私政策》。"
       },
       "openLogsDirError": "日誌目錄未能啟",
+      "privacyUpdateLabel": "應用更新",
+      "privacyUpdateDescription": "Cindy Privacy 由維護者另備安裝包，手動更新。",
+      "privacyUpdateSource": "覽原始碼",
       "autoUpdateLabel": "閒時自裝更新",
       "autoUpdateDescription": "更新取下既畢，若此機 10 分鐘無操作且無差事方行，則自重啟應用以成安裝。",
       "linuxUpdateDescription": "更新於君擇重啟時生效。系統 .deb 安裝須系統密碼，使用者目錄安裝則否。他法所裝者，請以相應套件管理器更新。",
@@ -9688,7 +9691,7 @@
       "ready": "新版已就，點側邊欄以竟更新，乘風而上。",
       "manifestFailed": "查更新未成，請檢查網路",
       "downloadFailed": "新版下載未成，稍後再試",
-      "manualDownload": "於應用程式內下載，再擇重新啟動之時。唯系統 .deb 安裝需系統密碼。"
+      "manualDownload": "Cindy Privacy 須手動安裝更新，可於設定 → 關於覽原始碼。"
     },
     "closeConfirm": {
       "title": "果欲離去乎？",

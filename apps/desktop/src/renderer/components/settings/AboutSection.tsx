@@ -23,11 +23,10 @@ import { SettingsBlock, SettingsCard, SettingsRow, SettingsSection } from '@/com
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useExperimentalFlag } from '@/hooks/useExperimentalFeatures';
-import { useAutoUpdateSettings } from '@/hooks/useAutoUpdateSettings';
 import { OpenLogsRow } from '@/components/log-support/LogSupportActions';
 import { PiKernelVersionRow } from './PiKernelVersionRow';
 import { HARNESS_MENU_ITEM_CLASS, HarnessMenuFootnote, HarnessVersionMenuItem, HarnessVersionMenuRow } from './HarnessVersionMenuRow';
-import { DefaultOverrideControls } from './DefaultOverrideControls';
+import { MANUAL_APP_UPDATE_URL } from '../../../shared/appUpdatePolicy';
 import { CURRENT_CINDY_REGION } from '../../../shared/brandRegion';
 import { LEGAL_LINKS } from '../../../shared/legalLinks';
 
@@ -345,7 +344,7 @@ export function AboutSection() {
             title={window.electronAPI.appDisplayVersionDetail}
           />
         )}
-        <AutoUpdateToggleRow />
+        <AppUpdateRow />
         <AgentVersionsRows />
         <DebugLogToggleRow />
         <SettingsBlock id={aboutSettings.logsDirLabel.targetId} className="p-0">
@@ -505,69 +504,30 @@ function SocialPlatformIcon({ id }: { id: (typeof DESKTOP_SOCIAL_LINKS)[number][
   );
 }
 
-export function AutoUpdateToggleRow() {
+export function AppUpdateRow() {
   const { t } = useTranslation();
-  const isLinux = window.electronAPI?.platform === 'linux';
-  const { state, setAutoRelaunchOnIdle, reset } = useAutoUpdateSettings();
-  const [saving, setSaving] = useState(false);
-
-  if (isLinux) {
-    return (
-      <SettingsRow
-        title={<span id={aboutSettings.autoUpdateLabel.targetId}>{t(aboutSettings.autoUpdateLabel.titleKey)}</span>}
-        hint={t('settings.about.linuxUpdateDescription')}
-      />
-    );
-  }
-
-  const handleToggle = async (next: boolean) => {
-    setSaving(true);
+  const openSource = async () => {
     try {
-      await setAutoRelaunchOnIdle(next);
-      toast.success(
-        next
-          ? t('settings.about.autoUpdateEnabledToast')
-          : t('settings.about.autoUpdateDisabledToast'),
-      );
+      const result = await window.electronAPI.openExternal(MANUAL_APP_UPDATE_URL);
+      if (!result.success) toast.error(t('settings.about.social.openFailed'));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.about.autoUpdateSaveFailed'));
-    } finally {
-      setSaving(false);
+      toast.error(err instanceof Error ? err.message : t('settings.about.social.openFailed'));
     }
   };
-
-  const handleReset = async () => {
-    setSaving(true);
-    try {
-      await reset();
-      toast.success(t('settings.defaults.restored'));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.defaults.restoreFailed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const disabled = state.loading || saving;
-
   return (
     <SettingsRow
       title={<span id={aboutSettings.autoUpdateLabel.targetId}>{t(aboutSettings.autoUpdateLabel.titleKey)}</span>}
       hint={t(aboutSettings.autoUpdateLabel.descriptionKey)}
       trailing={
-        <div className="flex shrink-0 items-center gap-2">
-          <DefaultOverrideControls
-            isCustomized={state.isCustomized}
-            disabled={disabled}
-            onReset={handleReset}
-          />
-          <Switch data-setting-id={aboutSettings.autoUpdateLabel.id}
-            checked={state.autoRelaunchOnIdle}
-            disabled={disabled}
-            onCheckedChange={handleToggle}
-            aria-label={t(aboutSettings.autoUpdateLabel.titleKey)}
-          />
-        </div>
+        <Button
+          data-settings-search-action="Open the maintained privacy build source"
+          variant="secondary"
+          size="sm"
+          onClick={() => void openSource()}
+        >
+          {t('settings.about.privacyUpdateSource')}
+          <ExternalLink aria-hidden size={13} strokeWidth={1.7} />
+        </Button>
       }
     />
   );
