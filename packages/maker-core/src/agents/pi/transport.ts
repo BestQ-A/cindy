@@ -121,7 +121,7 @@ export interface PiStdioTransportOptions {
 export function createPiStdioTransport(opts: PiStdioTransportOptions): PiTransport {
   const child: ChildProcessWithoutNullStreams = spawn(opts.binaryPath, opts.args, {
     cwd: opts.cwd,
-    env: opts.env as NodeJS.ProcessEnv,
+    env: { ...opts.env, PI_TELEMETRY: '0' },
     stdio: ['pipe', 'pipe', 'pipe'],
     // #5173:pi.exe 是 Bun 编译的控制台子系统可执行文件,Windows 上不隐藏窗口会为每个
     // 本机会话派生一个 conhost.exe;与仓库内其它 agent 子进程 spawn 保持一致。

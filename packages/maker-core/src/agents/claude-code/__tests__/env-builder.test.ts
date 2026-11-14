@@ -82,32 +82,19 @@ describe('buildClaudeEnv', () => {
     expect(env.CLAUDE_CODE_DISABLE_CRON).toBe('1');
   });
 
-  it('keeps native subscription feature-flag fetching enabled by default', async () => {
-    vi.stubEnv('DISABLE_TELEMETRY', undefined);
-    vi.stubEnv('DISABLE_ERROR_REPORTING', undefined);
-    vi.stubEnv('OTEL_SDK_DISABLED', undefined);
-    const env = await buildClaudeEnv(createAuthAdapter(), {}, { nativeCliAuth: true });
+  it.each(['local', 'remote'] as const)('forces telemetry off for %s Claude launches', async (mode) => {
+    vi.stubEnv('DISABLE_TELEMETRY', '0');
+    vi.stubEnv('DISABLE_ERROR_REPORTING', '0');
+    vi.stubEnv('OTEL_SDK_DISABLED', 'false');
 
-    // DISABLE_TELEMETRY also disables the served model catalog (Fable 5.2).
-    expect(env.DISABLE_TELEMETRY).toBeUndefined();
-    expect(env.DISABLE_ERROR_REPORTING).toBe('1');
-    expect(env.OTEL_SDK_DISABLED).toBe('true');
-  });
-
-  it.each(['local', 'remote'] as const)('keeps telemetry disabled by default for %s gateway sessions', async (mode) => {
-    vi.stubEnv('DISABLE_TELEMETRY', undefined);
     const env = await buildClaudeEnv(createAuthAdapter(), {}, {
       mode,
-      // Remote spawns must not accidentally inherit the local subscription exception.
-      nativeCliAuth: mode === 'remote',
+      nativeCliAuth: mode === 'local',
     });
-    expect(env.DISABLE_TELEMETRY).toBe('1');
-  });
 
-  it.each(['1', '0', ''])('preserves an explicit subscription telemetry setting %j', async (value) => {
-    vi.stubEnv('DISABLE_TELEMETRY', value);
-    const env = await buildClaudeEnv(createAuthAdapter(), {}, { nativeCliAuth: true });
-    expect(env.DISABLE_TELEMETRY).toBe(value);
+    expect(env.DISABLE_TELEMETRY).toBe('1');
+    expect(env.DISABLE_ERROR_REPORTING).toBe('1');
+    expect(env.OTEL_SDK_DISABLED).toBe('true');
   });
 
   // Anthropic #106458: API credits can be rejected when an SDK request claims a

@@ -1139,6 +1139,7 @@ async function runPackageProcess(
       env: {
         ...process.env,
         PI_CODING_AGENT_DIR: packageHome(),
+        PI_TELEMETRY: '0',
         PI_PACKAGE_DIR: undefined,
         PI_MANAGED_INSTALL_ROOT: undefined,
         NO_COLOR: '1',

@@ -786,6 +786,7 @@ function main() {
       const childEnv = Object.assign({}, process.env, {
         CINDY_PI_PERMISSION_FILE: config.permissionFile,
         PI_CODING_AGENT_DIR: config.childConfigHome,
+        PI_TELEMETRY: '0',
       });
       const childRg = path.join(config.childConfigHome, 'bin', process.platform === 'win32' ? 'rg.exe' : 'rg');
       try {

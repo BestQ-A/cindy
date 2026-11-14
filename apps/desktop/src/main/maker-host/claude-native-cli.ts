@@ -102,6 +102,9 @@ async function cliEnv(options: { network: boolean; configDir?: string }): Promis
     ...cleanProcessEnv(),
     ...(options.network ? await claudeCliNetworkEnv() : {}),
     ...(options.configDir ? { CLAUDE_CONFIG_DIR: options.configDir } : {}),
+    DISABLE_TELEMETRY: '1',
+    DISABLE_ERROR_REPORTING: '1',
+    OTEL_SDK_DISABLED: 'true',
   };
 }
 

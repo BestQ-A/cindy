@@ -578,14 +578,10 @@ export async function buildClaudeEnv(
     )?.contextWindow;
   applyClaudeContextWindow(env, activeContextWindow, runtimeConfig.autoCompactThresholdPct);
 
-  // 网关凭证不适用于 Anthropic 遥测端点，非原生订阅继续默认关闭遥测。
-  // DISABLE_TELEMETRY 同时关闭 feature-flag 获取，连带让 supportedModels 回退到
-  // 旧清单（2.1.321 会漏掉 Fable 5.2）。原生订阅会话和发现探针都保留 CLI 默认值；
-  // 用户显式设置仍原样传递，不通过删除或改成 '0' 绕过其选择。
-  if (!nativeCliAuth && env.DISABLE_TELEMETRY === undefined) env.DISABLE_TELEMETRY = '1';
-  // 错误上报及 OTEL 周期导出独立于模型发现，继续默认关闭，显式设置优先。
-  if (env.DISABLE_ERROR_REPORTING === undefined) env.DISABLE_ERROR_REPORTING = '1';
-  if (env.OTEL_SDK_DISABLED === undefined) env.OTEL_SDK_DISABLED = 'true';
+  // The local privacy build disables reporting for every Claude launch, including model discovery.
+  env.DISABLE_TELEMETRY = '1';
+  env.DISABLE_ERROR_REPORTING = '1';
+  env.OTEL_SDK_DISABLED = 'true';
 
   // Windows 下 Python piped stdout 默认走 locale encoding(cp936/GBK), 不看 chcp 65001。
   // 强制 UTF-8 避免 Bash 工具执行 python 命令时中文乱码。跨平台设置无副作用。

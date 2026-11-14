@@ -85,7 +85,7 @@ describe('ClaudeCodeAgent.refreshLocalModels(主动读取订阅模型清单)', (
       { prompt: AsyncIterable<unknown>; options: Record<string, unknown> },
     ];
     expect(options.pathToClaudeCodeExecutable).toBe(process.execPath);
-    expect((options.env as Record<string, string>).DISABLE_TELEMETRY).toBeUndefined();
+    expect((options.env as Record<string, string>).DISABLE_TELEMETRY).toBe('1');
     // 输入队列在探测结束时关闭且从未写入:没有任何用户消息发往模型。
     const received: unknown[] = [];
     for await (const item of prompt) received.push(item);

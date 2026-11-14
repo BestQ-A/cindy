@@ -66,7 +66,7 @@ describe('createPiStdioTransport', () => {
     expect(mocks.spawn).toHaveBeenCalledWith(
       '/pi',
       ['--mode', 'rpc'],
-      expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),
+      expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'], env: { PI_TELEMETRY: '0' } }),
     );
   });
 

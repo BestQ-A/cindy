@@ -3380,7 +3380,7 @@ it.each([
       });
       expect(spawn).toHaveBeenCalledWith(
         binaryPath,
-        ['login'],
+        expect.arrayContaining(['analytics.enabled=false', 'login']),
         expect.objectContaining({
           env: expect.objectContaining({ CODEX_HOME: path.dirname(localAuth) }),
         }),

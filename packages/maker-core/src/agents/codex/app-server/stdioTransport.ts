@@ -9,6 +9,7 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { CODEX_PRIVACY_ARGS } from '../privacy-args.js';
 import { createInterface, type Interface } from 'node:readline';
 import type {
   CloseHandler,
@@ -73,7 +74,7 @@ export function createStdioTransport(opts: StdioTransportOptions): Transport {
   let resolveExit!: () => void;
   const exitPromise = new Promise<void>((resolve) => { resolveExit = resolve; });
 
-  const args = ['app-server', ...(opts.extraArgs ?? [])];
+  const args = ['app-server', ...(opts.extraArgs ?? []), ...CODEX_PRIVACY_ARGS];
   const child: ChildProcessWithoutNullStreams = spawn(opts.binaryPath, args, {
     cwd: opts.cwd,
     env: opts.env,

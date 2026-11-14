@@ -16,12 +16,13 @@ afterEach(() => {
 
 describe('codexLoginArgs', () => {
   it('uses the official browser flow by default', () => {
-    expect(codexLoginArgs()).toEqual(['login']);
-    expect(codexLoginArgs('browser')).toEqual(['login']);
+    expect(codexLoginArgs()).toContain('analytics.enabled=false');
+    expect(codexLoginArgs().at(-1)).toBe('login');
+    expect(codexLoginArgs('browser')).toEqual(codexLoginArgs());
   });
 
   it('uses the official device authorization flow when requested', () => {
-    expect(codexLoginArgs('device-code')).toEqual(['login', '--device-auth']);
+    expect(codexLoginArgs('device-code').slice(-2)).toEqual(['login', '--device-auth']);
   });
 });
 

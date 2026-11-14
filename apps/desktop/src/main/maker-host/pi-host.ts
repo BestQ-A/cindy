@@ -428,6 +428,7 @@ export async function readPiBundledModels(
         ...(await readPiCatalogProbeEnv(binaryPath)),
         PI_CODING_AGENT_DIR: configDir,
         PI_OFFLINE: '1',
+        PI_TELEMETRY: '0',
       };
       for (const name of ['PATH', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'WINDIR', 'PATHEXT']) {
         if (process.env[name]) childEnv[name] = process.env[name];

@@ -147,7 +147,14 @@ describe('createStdioTransport process observer', () => {
 
     expect(mocks.spawn).toHaveBeenCalledWith(
       '/codex',
-      ['app-server'],
+      [
+        'app-server',
+        '-c', 'analytics.enabled=false',
+        '-c', 'feedback.enabled=false',
+        '-c', 'otel.exporter="none"',
+        '-c', 'otel.metrics_exporter="none"',
+        '-c', 'otel.trace_exporter="none"',
+      ],
       expect.objectContaining({
         cwd: '/workspace',
         shell: false,

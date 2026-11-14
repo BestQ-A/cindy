@@ -1,3 +1,4 @@
+import { CODEX_PRIVACY_ARGS } from '@cindy/maker-core/codex-privacy-args';
 /** Official CLI login/control APIs only. No Claude credential access. */
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -208,7 +209,7 @@ export function codexAccountRpc(
   const binary = getReadyBinaryPath('codex');
   if (!binary) return Promise.reject(new Error('Codex CLI unavailable'));
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, ['app-server'], {
+    const child = spawn(binary, ['app-server', ...CODEX_PRIVACY_ARGS], {
       cwd: homedir(),
       env: codexProfileEnv(directory),
       stdio: ['pipe', 'pipe', 'ignore'],
@@ -279,7 +280,7 @@ export async function loginNativeAccount(
   if (!binary) throw new Error('Codex CLI unavailable');
   if (signal.aborted) throw new Error('login_cancelled');
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(binary, ['login'], {
+    const child = spawn(binary, [...CODEX_PRIVACY_ARGS, 'login'], {
       cwd: homedir(),
       env: codexProfileEnv(directory),
       stdio: 'ignore',

@@ -98,7 +98,7 @@ beforeEach(() => {
       );
     });
     children.push(child);
-    if (args[0] === 'login' && !h.hold) queueMicrotask(() => child.emit('close', 0));
+    if (args.at(-1) === 'login' && !h.hold) queueMicrotask(() => child.emit('close', 0));
     return child;
   });
 });
@@ -246,7 +246,11 @@ describe('official Codex profiles', () => {
     ).rejects.toThrow('login_cancelled');
     abort.abort();
     await login;
-    expect(h.spawn.mock.calls.map((c) => c[1])).toEqual([['app-server'], ['login']]);
+    const [probeArgs, loginArgs] = h.spawn.mock.calls.map((c) => c[1]);
+    expect(probeArgs[0]).toBe('app-server');
+    expect(probeArgs).toContain('analytics.enabled=false');
+    expect(loginArgs.at(-1)).toBe('login');
+    expect(loginArgs).toContain('analytics.enabled=false');
     expect(children.every((c) => c.kill.mock.calls.length === 1)).toBe(true);
   });
 });
