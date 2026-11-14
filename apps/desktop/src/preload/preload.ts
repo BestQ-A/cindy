@@ -619,6 +619,7 @@ function createIpcFanOut(channel: string): FanOut {
 // 老 7 个 fanOut + fanOutUserMessagePersisted 一起拿掉。
 const fanOutUpdateStatus = createIpcFanOut('update-status');
 const fanOutHostBotReadStateChanged = createIpcFanOut('local-db:bots:read-state:changed');
+const fanOutHostBotHierarchyChanged = createIpcFanOut('local-db:bots:hierarchy:changed');
 const fanOutSkillhubLocalStateChanged = createIpcFanOut('skillhub:local-state-changed');
 const fanOutDatabaseSizeWarningChanged = createIpcFanOut('database-size-warning:changed');
 const fanOutDbSlimmingStartupProgress = createIpcFanOut(
@@ -6255,6 +6256,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
         }): Promise<{ ownerId: string | null; positions: Record<string, number>; acknowledgedPositions?: Record<string, number> }> =>
           ipcRenderer.invoke('local-db:bots:read-state:update', body),
         onChanged: fanOutHostBotReadStateChanged,
+      },
+      hierarchy: {
+        get: (): Promise<{
+          ownerId: string | null;
+          config: import('../shared/botHierarchy').BotHierarchyConfigV1;
+        }> => ipcRenderer.invoke('local-db:bots:hierarchy:get'),
+        write: (body: {
+          ownerId?: string | null;
+          config: import('../shared/botHierarchy').BotHierarchyConfigV1;
+          mode?: 'merge' | 'replace';
+        }): Promise<{
+          ownerId: string | null;
+          config: import('../shared/botHierarchy').BotHierarchyConfigV1;
+        }> => ipcRenderer.invoke('local-db:bots:hierarchy:write', body),
+        sync: (): Promise<{
+          ownerId: string | null;
+          config: import('../shared/botHierarchy').BotHierarchyConfigV1;
+        }> => ipcRenderer.invoke('local-db:bots:hierarchy:sync'),
+        onChanged: fanOutHostBotHierarchyChanged,
       },
       get: (botId: string): Promise<unknown> => ipcRenderer.invoke('local-db:bots:get', botId),
       chooseAvatarSource: (): Promise<{ canceled: boolean; previewDataUrl?: string }> =>

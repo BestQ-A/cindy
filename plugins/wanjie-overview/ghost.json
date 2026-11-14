@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 3,
+  "id": "wanjie-overview",
+  "name": "万界团队大屏",
+  "description": "汇总 Cindy 伙伴的实时状态、待处理事项、最近对话、逐岗验收和多机资源。",
+  "whenToUse": "查看万界团队大屏、伙伴运行情况、多机资源，记录逐岗试跑验收结果。",
+  "version": "1.2.0",
+  "minCindyVersion": "0.1.136",
+  "entry": "main.js",
+  "launch": "resident",
+  "command": "团队大屏",
+  "showTaskPreferences": false,
+  "agent": {
+    "companions": true,
+    "tasks": true,
+    "targets": true,
+    "delegation": true
+  },
+  "mainView": {
+    "title": "团队大屏",
+    "icon": "chart-column",
+    "html": "main-view.html"
+  },
+  "tools": [
+    {
+      "name": "start_verification",
+      "description": "接续万界伙伴逐岗只读运行验证，通过 Cindy 原生委派执行并保存回执。已核验通过的岗位会跳过；运行结束后仍需核对真实文件工具和岗位回复。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_status",
+      "description": "读取 Cindy 伙伴的当前运行状态和已保存的逐岗验收结果。运行中或空闲状态不代表验收通过。",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "record_verification",
+      "description": "将已实际执行的逐岗验收摘要保存到团队大屏。按伙伴编号合并更新，保留其他岗位结果。仅记录结论和简短证据摘要。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "checkedAt": {
+            "type": "string",
+            "description": "本次验收的 ISO 8601 时间。"
+          },
+          "results": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "companionId": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "passed",
+                    "failed",
+                    "blocked",
+                    "pending"
+                  ]
+                },
+                "summary": {
+                  "type": "string",
+                  "maxLength": 1000
+                }
+              },
+              "required": [
+                "companionId",
+                "status",
+                "summary"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "checkedAt",
+          "results"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "retry_verification",
+      "description": "对已保存实证失败结论且原输入已完成的单个岗位执行唯一一次只读重试。先查询原回执，未知或在途时拒绝重发。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "companionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "companionId"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

@@ -12265,6 +12265,31 @@
       "toggle": "啟「{{name}}」",
       "manage": "於自運之頁管理",
       "create": "往自運之頁新建"
+    },
+    "hierarchy": {
+      "menuTrigger": "顯示規制",
+      "newFolder": "新立卷匣",
+      "newSubfolder": "新立子匣",
+      "defaultFolderName": "無題卷匣",
+      "smartOrganize": "智能歸類",
+      "smartOrganizeDone": "同伴已歸類",
+      "smartOrganizeEmpty": "尚無可歸類之同伴",
+      "groupByComputer": "依機分群",
+      "compactDensity": "單行簡覽",
+      "expandAll": "盡展",
+      "collapseAll": "盡收",
+      "renameFolder": "更易匣名",
+      "renameInputLabel": "卷匣之名",
+      "deleteFolder": "撤去卷匣",
+      "moveToFolder": "遷入卷匣",
+      "moveOutOfFolder": "遷出卷匣",
+      "moveToRoot": "遷至頂層",
+      "createAndMove": "新立並遷入",
+      "ungrouped": "未分群",
+      "localComputer": "此機",
+      "selectGroupAll": "全擇此群",
+      "deselectGroupAll": "罷擇此群",
+      "searchMembersPlaceholder": "尋同伴…"
     }
   },
   "common": {

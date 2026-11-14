@@ -5215,6 +5215,27 @@ interface ElectronAPI {
           callback: (payload: unknown, ownerStamp?: unknown) => void,
         ) => () => void;
       };
+      hierarchy: {
+        get: () => Promise<{
+          ownerId: string | null;
+          config: import('../shared/botHierarchy').BotHierarchyConfigV1;
+        }>;
+        write: (body: {
+          ownerId?: string | null;
+          config: import('../shared/botHierarchy').BotHierarchyConfigV1;
+          mode?: 'merge' | 'replace';
+        }) => Promise<{
+          ownerId: string | null;
+          config: import('../shared/botHierarchy').BotHierarchyConfigV1;
+        }>;
+        sync: () => Promise<{
+          ownerId: string | null;
+          config: import('../shared/botHierarchy').BotHierarchyConfigV1;
+        }>;
+        onChanged: (
+          callback: (payload: unknown, ownerStamp?: unknown) => void,
+        ) => () => void;
+      };
       get: (botId: string) => Promise<unknown>;
       generateDraft: (
         body: import('../shared/botCreation').BotCreationRequest,

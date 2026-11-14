@@ -12411,6 +12411,31 @@
       "toggle": "Activar “{{name}}”",
       "manage": "Gestionar en Automatizaciones",
       "create": "Crear en Automatizaciones"
+    },
+    "hierarchy": {
+      "menuTrigger": "Opciones de visualización",
+      "newFolder": "Nueva carpeta",
+      "newSubfolder": "Nueva subcarpeta",
+      "defaultFolderName": "Carpeta sin título",
+      "smartOrganize": "Organización inteligente",
+      "smartOrganizeDone": "Amigos organizados",
+      "smartOrganizeEmpty": "No hay amigos para organizar",
+      "groupByComputer": "Agrupar por computadora",
+      "compactDensity": "Vista compacta",
+      "expandAll": "Expandir todo",
+      "collapseAll": "Contraer todo",
+      "renameFolder": "Cambiar nombre de carpeta",
+      "renameInputLabel": "Nombre de la carpeta",
+      "deleteFolder": "Eliminar carpeta",
+      "moveToFolder": "Mover a la carpeta",
+      "moveOutOfFolder": "Quitar de la carpeta",
+      "moveToRoot": "Mover al nivel superior",
+      "createAndMove": "Crear carpeta y mover",
+      "ungrouped": "Sin grupo",
+      "localComputer": "Esta computadora",
+      "selectGroupAll": "Seleccionar todo el grupo",
+      "deselectGroupAll": "Deseleccionar todo el grupo",
+      "searchMembersPlaceholder": "Buscar amigos…"
     }
   },
   "common": {

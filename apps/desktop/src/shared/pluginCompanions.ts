@@ -94,6 +94,46 @@ export interface PluginCompanion {
   interactions: PluginCompanionInteraction[];
   /** When the latest completed reply was persisted; a change means `reply` has something new. */
   lastReplyAt: number | null;
+  /** Optional folder id when organized in the owner's companion hierarchy; null/absent when ungrouped. */
+  groupId?: string | null;
+  /** Optional breadcrumb path segments from root folder to the companion's folder. */
+  groupPath?: string[];
+  /** Optional sort index inside the assigned folder (or root ungrouped order). */
+  groupOrder?: number;
+  /** Optional readable device/computer label aliases (kept compatible with `home.deviceName`). */
+  computerName?: string | null;
+  deviceLabel?: string | null;
+  deviceId?: string | null;
+}
+
+/** Flat folder node in the owner's companion hierarchy returned alongside `list()`. */
+export interface PluginCompanionFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  depth: number;
+  order: number;
+  path: string[];
+}
+
+/** Recursive folder tree node in `PluginCompanionHierarchy`. */
+export interface PluginCompanionFolderTreeNode extends PluginCompanionFolder {
+  children: PluginCompanionFolderTreeNode[];
+}
+
+/** Multi-level folder hierarchy attached to `cindy.companions.list()` (optional for older hosts). */
+export interface PluginCompanionHierarchy {
+  folders: PluginCompanionFolder[];
+  tree: PluginCompanionFolderTreeNode[];
+  rootOrder: string[];
+  updatedAt?: number;
+}
+
+export interface PluginCompanionListResult {
+  companions: PluginCompanion[];
+  folders: PluginCompanionFolder[];
+  hierarchy: PluginCompanionHierarchy;
+  observedAt: number;
 }
 
 export interface PluginCompanionAvatar {

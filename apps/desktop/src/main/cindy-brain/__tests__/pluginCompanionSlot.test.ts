@@ -8,7 +8,7 @@ import {
   type PluginCompanionAdapter,
   type PluginCompanionContext,
 } from '../pluginCompanionSlot.js';
-import type { PluginCompanion } from '../../../shared/pluginCompanions.js';
+import type { PluginCompanion, PluginCompanionHierarchy } from '../../../shared/pluginCompanions.js';
 
 const companion: PluginCompanion = {
   id: 'b1', name: 'Ada', description: '', home: { isSelf: true, online: true, deviceName: null }, status: 'running',
@@ -156,4 +156,51 @@ it('reads the recent conversation, 20 messages unless asked for up to 50', async
   expect(a.history).toHaveBeenLastCalledWith('b1', 20, expect.any(Function));
   await handlePluginCompanionRequest(a, hub(), { kind: 'history', companionId: 'b1', limit: 50 }, ctx());
   expect(a.history).toHaveBeenLastCalledWith('b1', 50, expect.any(Function));
+});
+
+it('returns optional folders and hierarchy on list and fails closed if authorization revokes mid-hierarchy read', async () => {
+  const a = adapter();
+  // Legacy adapter without hierarchy() still returns empty folders/hierarchy safely alongside companions.
+  expect(await handlePluginCompanionRequest(a, hub(), { kind: 'list' }, ctx())).toMatchObject({
+    ok: true,
+    data: { companions: [companion], folders: [], hierarchy: { folders: [], tree: [], rootOrder: [] } },
+  });
+
+  const sampleHierarchy: PluginCompanionHierarchy = {
+    folders: [
+      { id: 'f1', name: '万界', parentId: null, depth: 1, order: 0, path: ['万界'] },
+      { id: 'f2', name: '技术研发', parentId: 'f1', depth: 2, order: 0, path: ['万界', '技术研发'] },
+    ],
+    tree: [{
+      id: 'f1', name: '万界', parentId: null, depth: 1, order: 0, path: ['万界'],
+      children: [{ id: 'f2', name: '技术研发', parentId: 'f1', depth: 2, order: 0, path: ['万界', '技术研发'], children: [] }],
+    }],
+    rootOrder: ['b2'],
+    updatedAt: 123,
+  };
+  const groupedCompanion: PluginCompanion = { ...companion, groupId: 'f2', groupPath: ['万界', '技术研发'], groupOrder: 0 };
+  const withHierarchy: PluginCompanionAdapter = {
+    ...adapter(),
+    list: vi.fn(async (guard) => { guard(); return [groupedCompanion]; }),
+    hierarchy: vi.fn(async (guard) => { guard(); return sampleHierarchy; }),
+  };
+  expect(await handlePluginCompanionRequest(withHierarchy, hub(), { kind: 'list' }, ctx())).toMatchObject({
+    ok: true,
+    data: { companions: [groupedCompanion], folders: sampleHierarchy.folders, hierarchy: sampleHierarchy },
+  });
+
+  let authorized = true;
+  const guarded = ctx({
+    assertAuthorized: () => {
+      if (!authorized) throw Object.assign(new Error('revoked'), { code: 'PERMISSION_DENIED' });
+    },
+  });
+  (withHierarchy.hierarchy as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+    authorized = false;
+    return sampleHierarchy;
+  });
+  expect(await handlePluginCompanionRequest(withHierarchy, hub(), { kind: 'list' }, guarded)).toMatchObject({
+    ok: false,
+    error: { code: 'PERMISSION_DENIED' },
+  });
 });

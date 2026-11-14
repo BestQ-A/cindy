@@ -12265,6 +12265,31 @@
       "toggle": "“{{name}}” 켜기",
       "manage": "자동화 페이지에서 관리",
       "create": "자동화 페이지에서 만들기"
+    },
+    "hierarchy": {
+      "menuTrigger": "표시 설정",
+      "newFolder": "새 폴더",
+      "newSubfolder": "새 하위 폴더",
+      "defaultFolderName": "제목 없는 폴더",
+      "smartOrganize": "스마트 정리",
+      "smartOrganizeDone": "동반자를 정리했습니다",
+      "smartOrganizeEmpty": "정리할 동반자가 없습니다",
+      "groupByComputer": "컴퓨터별 그룹화",
+      "compactDensity": "간략한 보기",
+      "expandAll": "모두 펼치기",
+      "collapseAll": "모두 접기",
+      "renameFolder": "폴더 이름 변경",
+      "renameInputLabel": "폴더 이름",
+      "deleteFolder": "폴더 삭제",
+      "moveToFolder": "폴더로 이동",
+      "moveOutOfFolder": "폴더에서 제거",
+      "moveToRoot": "최상위로 이동",
+      "createAndMove": "새 폴더 만들어 이동",
+      "ungrouped": "미분류",
+      "localComputer": "이 컴퓨터",
+      "selectGroupAll": "이 그룹 모두 선택",
+      "deselectGroupAll": "이 그룹 선택 해제",
+      "searchMembersPlaceholder": "동반자 검색…"
     }
   },
   "common": {

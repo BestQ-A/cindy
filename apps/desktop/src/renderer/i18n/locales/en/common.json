@@ -12311,6 +12311,31 @@
       "toggle": "Turn on “{{name}}”",
       "manage": "Manage in Automations",
       "create": "Create in Automations"
+    },
+    "hierarchy": {
+      "menuTrigger": "Display options",
+      "newFolder": "New Folder",
+      "newSubfolder": "New Subfolder",
+      "defaultFolderName": "Untitled Folder",
+      "smartOrganize": "Smart organize",
+      "smartOrganizeDone": "Buddies organized",
+      "smartOrganizeEmpty": "No buddies to organize",
+      "groupByComputer": "Group by computer",
+      "compactDensity": "Compact density",
+      "expandAll": "Expand all",
+      "collapseAll": "Collapse all",
+      "renameFolder": "Rename folder",
+      "renameInputLabel": "Folder name",
+      "deleteFolder": "Delete folder",
+      "moveToFolder": "Move to folder",
+      "moveOutOfFolder": "Remove from folder",
+      "moveToRoot": "Move to top level",
+      "createAndMove": "Create folder & move",
+      "ungrouped": "Ungrouped",
+      "localComputer": "This computer",
+      "selectGroupAll": "Select all",
+      "deselectGroupAll": "Deselect all",
+      "searchMembersPlaceholder": "Search buddies…"
     }
   },
   "common": {

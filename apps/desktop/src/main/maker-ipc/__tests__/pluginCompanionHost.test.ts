@@ -41,6 +41,9 @@ vi.mock('../../localDb/client/current.js', () => ({
 import {
   createPluginCompanionHost, PLUGIN_COMPANION_CONFIRM_MAX, PLUGIN_COMPANION_MESSAGE_MAX, PLUGIN_COMPANION_REPLY_MAX, type PluginCompanionAllowPrompt, type PluginCompanionRemoteDeps,
 } from '../pluginCompanionHost.js';
+import {
+  assignItemsToFolder, botHierarchyItemKey, createBotFolder, createEmptyBotHierarchyConfig, groupHierarchyItemKey,
+} from '../../../shared/botHierarchy.js';
 
 const source = (id: string, over: Record<string, unknown> = {}) => ({
   id, name: id.toUpperCase(), description: `${id} desc`, avatar: '', avatarColor: '', status: 'active',
@@ -437,4 +440,59 @@ it('reads the conversation of a companion on another computer from there, and no
   expect(remote.invoke).toHaveBeenLastCalledWith('laptop', 'maker:companion-live:read', [{ version: 1, kind: 'history', companionId: 'far', limit: 20 }]);
   const older = createPluginCompanionHost(deps(laptop(() => { throw Object.assign(new Error('x'), { code: 'INVALID_PARAMS' }); })));
   expect(await older.history('far', 20, () => {})).toBeNull();
+});
+
+it('attaches multi-level folder groupId/groupPath/groupOrder to local and remote companions without leaking deviceIds', async () => {
+  let config = createEmptyBotHierarchyConfig(100);
+  const root = createBotFolder(config, { id: 'f-root', name: '万界', now: 101 });
+  config = root.config;
+  const dev = createBotFolder(config, { id: 'f-dev', name: '技术研发', parentId: 'f-root', now: 102 });
+  config = dev.config;
+  const ops = createBotFolder(config, { id: 'f-ops', name: '运营', parentId: 'f-root', now: 103 });
+  config = ops.config;
+  // Local 'ada' in nested '万界 / 技术研发', remote 'far' via device-scoped key in '万界 / 运营', 'bo' ungrouped in rootOrder.
+  config = assignItemsToFolder(config, [botHierarchyItemKey('ada')], 'f-dev', { now: 104 });
+  config = assignItemsToFolder(config, [botHierarchyItemKey('far', 'laptop')], 'f-ops', { now: 105 });
+  config = assignItemsToFolder(config, [botHierarchyItemKey('bo'), groupHierarchyItemKey('g1')], null, { now: 106 });
+
+  const remote = laptop(() => ({
+    version: 1,
+    companions: [farOnLaptop],
+    sessions: {},
+    conversations: { far: 'far-main' },
+  }));
+  const host = createPluginCompanionHost({ ...deps(remote), readHierarchy: () => config });
+  const companions = await host.list(() => {});
+  const ada = companions.find(c => c.id === 'ada')!;
+  const bo = companions.find(c => c.id === 'bo')!;
+  const far = companions.find(c => c.id === 'far')!;
+
+  expect(ada).toMatchObject({ groupId: 'f-dev', groupPath: ['万界', '技术研发'], groupOrder: 0 });
+  expect(bo).toMatchObject({ groupId: null, groupPath: [], groupOrder: 0 });
+  expect(far).toMatchObject({ groupId: 'f-ops', groupPath: ['万界', '运营'], groupOrder: 0 });
+  expect(JSON.stringify(companions)).not.toContain('laptop');
+
+  // Offline remote companions also retain their folder assignment.
+  const offlineHost = createPluginCompanionHost({ ...deps(), readHierarchy: () => config });
+  const offlineCompanions = await offlineHost.list(() => {});
+  expect(offlineCompanions.find(c => c.id === 'far')).toMatchObject({
+    status: 'offline',
+    groupId: 'f-ops',
+    groupPath: ['万界', '运营'],
+    groupOrder: 0,
+  });
+  expect(JSON.stringify(offlineCompanions)).not.toContain('laptop');
+
+  const hierarchy = await host.hierarchy!(() => {});
+  expect(hierarchy.folders).toEqual([
+    { id: 'f-root', name: '万界', parentId: null, depth: 1, order: 0, path: ['万界'] },
+    { id: 'f-dev', name: '技术研发', parentId: 'f-root', depth: 2, order: 0, path: ['万界', '技术研发'] },
+    { id: 'f-ops', name: '运营', parentId: 'f-root', depth: 2, order: 1, path: ['万界', '运营'] },
+  ]);
+  expect(hierarchy.tree[0]!.children.map(c => c.name)).toEqual(['技术研发', '运营']);
+  // Group chats are excluded and remote-bot:<deviceId>: prefix is stripped.
+  expect(hierarchy.rootOrder).toEqual(['bo']);
+
+  const denied = () => { throw Object.assign(new Error('x'), { code: 'PERMISSION_DENIED' }); };
+  await expect(host.hierarchy!(denied)).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
 });

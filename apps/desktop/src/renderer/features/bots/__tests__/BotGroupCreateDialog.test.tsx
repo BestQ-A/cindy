@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  assignItemsToFolder,
+  botHierarchyItemKey,
+  createBotFolder,
+  createEmptyBotHierarchyConfig,
+} from '../../../../shared/botHierarchy';
+import { mutateBotHierarchy, resetBotHierarchyStoreForTests } from '../botHierarchyClientStore';
 import { BotGroupCreateDialog } from '../BotGroupCreateDialog';
 
 const mocks = vi.hoisted(() => ({
@@ -46,6 +53,7 @@ function checkbox(name: string): HTMLButtonElement {
 }
 
 beforeEach(() => {
+  resetBotHierarchyStoreForTests();
   mocks.status.mockResolvedValue({ enabled: false });
   mocks.ownedBots.mockReset().mockResolvedValue({ ok: true, bots: [] });
   mocks.createBotGroup.mockReset().mockResolvedValue({ ok: true, groupId: 'g-new' });
@@ -63,7 +71,10 @@ beforeEach(() => {
   ];
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetBotHierarchyStoreForTests();
+});
 
 describe('BotGroupCreateDialog', () => {
   it('retries a failed roster request without losing the group name', async () => {
@@ -161,6 +172,168 @@ describe('BotGroupCreateDialog', () => {
     const { onOpenChange } = await renderDialog();
     fireEvent.click(screen.getByRole('button', { name: 'bots.cancel' }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('uses searchbox role for member search, blocks Enter submit, and preserves selections across filtering', async () => {
+    await renderDialog();
+    const nameInput = screen.getByRole('textbox');
+    const searchInput = screen.getByRole('searchbox');
+    expect(searchInput).toBeTruthy();
+    expect(nameInput).not.toBe(searchInput);
+
+    // Pressing Enter in the searchbox must not submit the form.
+    fireEvent.keyDown(searchInput, { key: 'Enter' });
+    fireEvent.submit(searchInput.closest('form')!);
+    expect(mocks.createBotGroup).not.toHaveBeenCalled();
+
+    fireEvent.change(searchInput, { target: { value: 'Bot b' } });
+    expect(screen.queryByRole('checkbox', { name: /Bot a/ })).toBeNull();
+    fireEvent.click(checkbox('Bot b'));
+
+    fireEvent.change(searchInput, { target: { value: '' } });
+    expect(checkbox('Bot b').getAttribute('aria-checked')).toBe('true');
+    expect(checkbox('Bot a')).toBeTruthy();
+  });
+
+  it('renders nested folder groups with indentation and breadcrumbs and filters by folder name or path', async () => {
+    await mutateBotHierarchy(() => {
+      let config = createEmptyBotHierarchyConfig(100);
+      const rootRes = createBotFolder(config, { id: 'root-wj', name: '万界', now: 101 });
+      config = rootRes.config;
+      const devRes = createBotFolder(config, { id: 'sub-dev', name: '技术研发', parentId: 'root-wj', now: 102 });
+      config = devRes.config;
+      const prodRes = createBotFolder(config, { id: 'sub-prod', name: '产品策划', parentId: 'root-wj', now: 103 });
+      config = prodRes.config;
+      config = assignItemsToFolder(config, [botHierarchyItemKey('a'), botHierarchyItemKey('b')], 'sub-dev', { now: 104 });
+      config = assignItemsToFolder(config, [botHierarchyItemKey('c')], 'sub-prod', { now: 105 });
+      return config;
+    });
+
+    const { container } = render(<BotGroupCreateDialog onOpenChange={vi.fn()} onCreated={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'bots.groupChat.create.submit' })).toHaveProperty('disabled', false));
+
+    expect(screen.getByText('万界')).toBeTruthy();
+    expect(screen.getByText('万界 / 技术研发')).toBeTruthy();
+    expect(screen.getByText('万界 / 产品策划')).toBeTruthy();
+    expect(screen.getByText('bots.hierarchy.ungrouped')).toBeTruthy();
+
+    const rootSection = document.querySelector('[data-folder-section="root-wj"]');
+    const devSection = document.querySelector('[data-folder-section="sub-dev"]');
+    expect(rootSection?.getAttribute('data-depth')).toBe('1');
+    expect(devSection?.getAttribute('data-depth')).toBe('2');
+    expect(container).toBeTruthy();
+
+    const searchInput = screen.getByRole('searchbox');
+    fireEvent.change(searchInput, { target: { value: '技术研发' } });
+    expect(checkbox('Bot a')).toBeTruthy();
+    expect(checkbox('Bot b')).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: /Bot c/ })).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /Bot d/ })).toBeNull();
+
+    fireEvent.change(searchInput, { target: { value: '万界 / 产品策划' } });
+    expect(checkbox('Bot c')).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: /Bot a/ })).toBeNull();
+  });
+
+  it('supports selectGroupAll and deselectGroupAll while enforcing the 6-member limit', async () => {
+    mocks.profiles = [
+      bot('a', 1),
+      bot('b', 2),
+      bot('c', 3),
+      bot('d', 4),
+      bot('e', 5),
+      bot('f', 6),
+      bot('g', 7),
+      bot('h', 8),
+      bot('paused', 9, 'paused'),
+    ];
+    await mutateBotHierarchy(() => {
+      let config = createEmptyBotHierarchyConfig(200);
+      const smallRes = createBotFolder(config, { id: 'f-small', name: '小团队', now: 201 });
+      config = smallRes.config;
+      const largeRes = createBotFolder(config, { id: 'f-large', name: '大团队', now: 202 });
+      config = largeRes.config;
+      config = assignItemsToFolder(
+        config,
+        [botHierarchyItemKey('a'), botHierarchyItemKey('b'), botHierarchyItemKey('c'), botHierarchyItemKey('paused')],
+        'f-small',
+        { now: 203 },
+      );
+      config = assignItemsToFolder(
+        config,
+        [botHierarchyItemKey('d'), botHierarchyItemKey('e'), botHierarchyItemKey('f'), botHierarchyItemKey('g'), botHierarchyItemKey('h')],
+        'f-large',
+        { now: 204 },
+      );
+      return config;
+    });
+
+    await renderDialog();
+    const smallSection = document.querySelector('[data-folder-section="f-small"]') as HTMLElement;
+    const largeSection = document.querySelector('[data-folder-section="f-large"]') as HTMLElement;
+
+    // Selecting small group picks a, b, c and skips paused.
+    fireEvent.click(within(smallSection).getByRole('button', { name: 'bots.hierarchy.selectGroupAll' }));
+    expect(checkbox('Bot a').getAttribute('aria-checked')).toBe('true');
+    expect(checkbox('Bot b').getAttribute('aria-checked')).toBe('true');
+    expect(checkbox('Bot c').getAttribute('aria-checked')).toBe('true');
+    expect(checkbox('Bot paused').getAttribute('aria-checked')).toBe('false');
+    expect(within(smallSection).getByRole('button', { name: 'bots.hierarchy.deselectGroupAll' })).toBeTruthy();
+
+    // Selecting large group truncates at BOT_GROUP_MAX_MEMBERS = 6 (adds d, e, f only).
+    fireEvent.click(within(largeSection).getByRole('button', { name: 'bots.hierarchy.selectGroupAll' }));
+    expect(checkbox('Bot d').getAttribute('aria-checked')).toBe('true');
+    expect(checkbox('Bot e').getAttribute('aria-checked')).toBe('true');
+    expect(checkbox('Bot f').getAttribute('aria-checked')).toBe('true');
+    expect(checkbox('Bot g').getAttribute('aria-checked')).toBe('false');
+    expect(checkbox('Bot h').getAttribute('aria-checked')).toBe('false');
+    expect(checkbox('Bot g').disabled).toBe(true);
+
+    // Deselecting small group frees 3 slots while keeping large group selections intact.
+    fireEvent.click(within(smallSection).getByRole('button', { name: 'bots.hierarchy.deselectGroupAll' }));
+    expect(checkbox('Bot a').getAttribute('aria-checked')).toBe('false');
+    expect(checkbox('Bot d').getAttribute('aria-checked')).toBe('true');
+    expect(checkbox('Bot g').disabled).toBe(false);
+
+    // Submitting sends selected members in picker order.
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '分组测试群' } });
+    fireEvent.click(screen.getByRole('button', { name: 'bots.groupChat.create.submit' }));
+    await waitFor(() => expect(mocks.createBotGroup).toHaveBeenCalledWith({
+      name: '分组测试群',
+      botIds: ['d', 'e', 'f'],
+    }));
+  });
+
+  it('caps single-group selectGroupAll at six when a folder has more than six selectable bots and toggles to deselectGroupAll', async () => {
+    mocks.profiles = Array.from({ length: 8 }, (_, idx) => bot(`m${idx + 1}`, idx + 1));
+    await mutateBotHierarchy(() => {
+      let config = createEmptyBotHierarchyConfig(300);
+      const big = createBotFolder(config, { id: 'f-eight', name: '八人组', now: 301 });
+      config = big.config;
+      config = assignItemsToFolder(
+        config,
+        mocks.profiles.map((item) => botHierarchyItemKey((item as { id: string }).id)),
+        'f-eight',
+        { now: 302 },
+      );
+      return config;
+    });
+
+    await renderDialog();
+    const section = document.querySelector('[data-folder-section="f-eight"]') as HTMLElement;
+    fireEvent.click(within(section).getByRole('button', { name: 'bots.hierarchy.selectGroupAll' }));
+
+    const checkedCount = screen
+      .getAllByRole('checkbox')
+      .filter((el) => el.getAttribute('aria-checked') === 'true').length;
+    expect(checkedCount).toBe(6);
+
+    const deselectBtn = within(section).getByRole('button', { name: 'bots.hierarchy.deselectGroupAll' });
+    fireEvent.click(deselectBtn);
+    const afterDeselectCount = screen
+      .getAllByRole('checkbox')
+      .filter((el) => el.getAttribute('aria-checked') === 'true').length;
+    expect(afterDeselectCount).toBe(0);
   });
 });
 

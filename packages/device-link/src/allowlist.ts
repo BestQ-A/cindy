@@ -662,6 +662,10 @@ const EXTENDED_INVOKE_CHANNELS: readonly string[] = [
   // 放行标准：① 只读 ② 同账号已授权控制端本就能经 maker:list-active / sessions:get-many 看到
   // 同样的任务标题与状态 ③ 没有任何写入或本机特权动作。设置读写（settings-*）不放行。
   'local-db:bots:autonomy:glance',
+  // Companion folder hierarchy: scoped to active owner preferences, no paths/credentials/native UI.
+  'local-db:bots:hierarchy:get',
+  'local-db:bots:hierarchy:write',
+  'local-db:bots:hierarchy:sync',
   // Same-account opted-in controllers read a companion's old task cards (read-only; cancel stays
   // for older controllers and answers UNSUPPORTED_CAPABILITY) and a participant-checked private
   // thread. No profile mutation.
@@ -818,6 +822,8 @@ export const PUSH_FORWARD_ALLOWLIST: ReadonlySet<string> = new Set([
   'maker:bot-delegation:changed',
   // 伙伴自主跟进状态变化（payload 只有 { botIds? }，节流 ≤1 次/秒），控制端据此重读「一眼」。
   'maker:bot-autonomy:changed',
+  // Bot folder hierarchy updates broadcast from main process (`botHierarchyStore.ts`).
+  'local-db:bots:hierarchy:changed',
   'maker:bot-direct-message:changed',
   // maker-ipc MAKER_PUSH
   'maker:event',

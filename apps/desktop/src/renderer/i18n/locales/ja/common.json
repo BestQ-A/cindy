@@ -12265,6 +12265,31 @@
       "toggle": "「{{name}}」をオンにする",
       "manage": "自動化ページで管理",
       "create": "自動化ページで作成"
+    },
+    "hierarchy": {
+      "menuTrigger": "表示設定",
+      "newFolder": "新規フォルダ",
+      "newSubfolder": "新規サブフォルダ",
+      "defaultFolderName": "名称未設定フォルダ",
+      "smartOrganize": "スマート整理",
+      "smartOrganizeDone": "仲間を整理しました",
+      "smartOrganizeEmpty": "整理できる仲間がいません",
+      "groupByComputer": "コンピューター別にグループ化",
+      "compactDensity": "コンパクト表示",
+      "expandAll": "すべて展開",
+      "collapseAll": "すべて折りたたむ",
+      "renameFolder": "フォルダ名を変更",
+      "renameInputLabel": "フォルダ名",
+      "deleteFolder": "フォルダを削除",
+      "moveToFolder": "フォルダに移動",
+      "moveOutOfFolder": "フォルダから外す",
+      "moveToRoot": "最上位に移動",
+      "createAndMove": "新規作成して移動",
+      "ungrouped": "未分類",
+      "localComputer": "このコンピューター",
+      "selectGroupAll": "このグループをすべて選択",
+      "deselectGroupAll": "このグループの選択を解除",
+      "searchMembersPlaceholder": "仲間を検索…"
     }
   },
   "common": {

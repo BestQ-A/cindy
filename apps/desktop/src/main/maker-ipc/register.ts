@@ -292,6 +292,10 @@ import { currentOauthIdentityScope, loadOauthSigningKey } from '../plugin-oauth/
 import { readDeviceLinkSettings, readLastKnownDeviceNames } from '../device-link/settings-store.desktop.js';
 import { getDeviceLinkStatus, getMobileNotifyGeneration, sendMobileBotGroupNotify, sendMobileSessionNotify } from '../device-link/index.js';
 import { notifyRelayAccountPreferenceChanged } from '../device-link/selfHostedRelayRuntime.js';
+import {
+  notifyBotHierarchyAccountPreferenceChanged,
+  onBotHierarchyChanged,
+} from './botHierarchyStore.js';
 import type { AgentMeta, Session as RendererSession } from '../../renderer/lib/ccAgent.types';
 import {
   deriveAutoTitleSeed,
@@ -13858,7 +13862,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       if (current()) getAgentIslandService()?.setGroupChat(groupId, input);
     },
     // 同账号中转目录(自建中转):另一台设备列出或申请加入这台电脑的中转。
-    onAccountPreferenceChanged: notifyRelayAccountPreferenceChanged,
+    onAccountPreferenceChanged: (key) => {
+      notifyRelayAccountPreferenceChanged(key);
+      void notifyBotHierarchyAccountPreferenceChanged(key);
+    },
     onChatMessageNotification: (event, current) => {
       if (!current() || !getDesktopNotificationsEnabled()) return;
       if (event.conversationKind !== 'direct' && getAgentIslandService()?.notifyGroupChat(event.groupId)) return;
@@ -14983,6 +14990,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
   });
   invalidatePluginCompanions = () => companionHub?.invalidate();
+  onBotHierarchyChanged(() => {
+    invalidatePluginCompanions();
+  });
   let pluginTargetReviewReady = false;
   setPluginTargetAdapter({
     prepareInvocation: preparePluginInvocation,

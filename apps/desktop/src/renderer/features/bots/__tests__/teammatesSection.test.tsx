@@ -52,6 +52,7 @@ vi.mock('../companionCloudStore', () => ({ useCompanionCloud: () => mocks.cloud 
 vi.mock('../useRemoteBots', () => ({ useRemoteBots: () => mocks.remoteBots }));
 vi.mock('@/features/device-link/useDeviceLinkDeviceList', () => ({
   useDeviceLinkDeviceList: () => mocks.devices,
+  useDeviceLinkDeviceListRequestState: () => ({ status: 'ready', error: null }),
 }));
 
 vi.mock('@/state/agentIslandActivity', () => ({
@@ -97,9 +98,21 @@ vi.mock('../BotDeleteDialog', () => ({
 
 import { TeammatesSection } from '../TeammatesSection';
 import { BotConnectionStatus } from '../BotConnectionStatus';
+import {
+  getBotHierarchySnapshot,
+  mutateBotHierarchy,
+  resetBotHierarchyStoreForTests,
+} from '../botHierarchyClientStore';
 import { markBotRead, resetBotReadStateForTests } from '../botReadState';
 import { readTeammatesSectionCollapsed } from '../teammatesSectionPrefs';
 import { setDataOwnerGeneration } from '@/contexts/dataOwnerGeneration';
+import { toast } from '@/lib/toast';
+import {
+  assignItemsToFolder,
+  createBotFolder,
+  createEmptyBotHierarchyConfig,
+  resolveItemFolderId,
+} from '../../../../shared/botHierarchy';
 
 interface BotFixture {
   id: string;
@@ -139,6 +152,7 @@ beforeEach(() => {
   messageListeners = [];
   window.localStorage.clear();
   resetBotReadStateForTests();
+  resetBotHierarchyStoreForTests();
   setDataOwnerGeneration('fixture-owner', 1);
   mocks.navigate.mockReset();
   mocks.observeSession.mockReset();
@@ -1084,5 +1098,448 @@ describe('cloud companions in the roster', () => {
     expect(screen.queryByText('Local preview')).toBeNull();
     expect(screen.queryByTestId('cindy-device-row')).toBeNull();
     expect(screen.getByText('Laptop preview')).toBeTruthy();
+  });
+});
+
+describe('botHierarchyClientStore IPC & fallback', () => {
+  it('hydrates from electronAPI, persists writes, reacts to push updates, and resets cleanly', async () => {
+    const pushListeners: Array<(payload: unknown, stamp?: unknown) => void> = [];
+    const base = createBotFolder(createEmptyBotHierarchyConfig(), {
+      id: 'f-ipc',
+      name: 'Synced Team',
+    }).config;
+    const remote = createBotFolder(base, {
+      id: 'f-push',
+      name: 'Pushed Folder',
+    }).config;
+
+    const getMock = vi.fn(async () => ({ ownerId: 'fixture-owner', config: base }));
+    const writeMock = vi.fn(async (body: { config: typeof base }) => ({
+      ownerId: 'fixture-owner',
+      config: body.config,
+    }));
+
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      writable: true,
+      value: {
+        ...(window as unknown as { electronAPI: Record<string, unknown> }).electronAPI,
+        localDb: {
+          ...((window as unknown as { electronAPI: { localDb: Record<string, unknown> } }).electronAPI
+            .localDb),
+          bots: {
+            hierarchy: {
+              get: getMock,
+              write: writeMock,
+              sync: vi.fn(async () => ({ ownerId: 'fixture-owner', config: base })),
+              onChanged: (cb: (payload: unknown, stamp?: unknown) => void) => {
+                pushListeners.push(cb);
+                return () => {};
+              },
+            },
+          },
+        },
+      },
+    });
+
+    mocks.profiles = [bot({ id: 'bot-1', name: 'Alpha' })];
+    await renderSidebar();
+
+    await waitFor(() => {
+      expect(getMock).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Synced Team')).toBeTruthy();
+    });
+
+    await act(async () => {
+      await mutateBotHierarchy((curr) => assignItemsToFolder(curr, ['bot:bot-1'], 'f-ipc'));
+    });
+    expect(writeMock).toHaveBeenCalledTimes(1);
+    expect(resolveItemFolderId(getBotHierarchySnapshot().config, 'bot:bot-1')).toBe('f-ipc');
+
+    act(() => {
+      for (const listener of pushListeners) {
+        listener(
+          { ownerId: 'fixture-owner', config: remote },
+          { dataOwnerId: 'fixture-owner', ownerGeneration: 1 },
+        );
+      }
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Pushed Folder')).toBeTruthy();
+      expect(getBotHierarchySnapshot().config.folders['f-push']?.name).toBe('Pushed Folder');
+    });
+
+    resetBotHierarchyStoreForTests();
+    expect(Object.keys(getBotHierarchySnapshot().config.folders)).toHaveLength(0);
+  });
+});
+
+describe('TeammatesSection hierarchy, display menu, and tree interactions', () => {
+  async function openDisplayMenu() {
+    const trigger = screen.getByRole('button', { name: 'bots.hierarchy.menuTrigger' });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    return screen.findByRole('menuitem', { name: 'bots.hierarchy.newFolder' });
+  }
+
+  it('creates root folder from display menu and supports inline rename commit and escape cancel', async () => {
+    mocks.profiles = [bot({ id: 'bot-1', name: 'Alpha' })];
+    await renderSidebar();
+
+    const newFolderItem = await openDisplayMenu();
+    fireEvent.click(newFolderItem);
+
+    const renameInput = (await screen.findByLabelText(
+      'bots.hierarchy.renameInputLabel',
+    )) as HTMLInputElement;
+    expect(renameInput.value).toBe('bots.hierarchy.defaultFolderName');
+
+    fireEvent.change(renameInput, { target: { value: 'Core Ops' } });
+    fireEvent.keyDown(renameInput, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('bots.hierarchy.renameInputLabel')).toBeNull();
+      expect(screen.getByText('Core Ops')).toBeTruthy();
+    });
+
+    const folderButton = screen.getByText('Core Ops').closest('button')!;
+    fireEvent.doubleClick(folderButton);
+    const editAgain = (await screen.findByLabelText(
+      'bots.hierarchy.renameInputLabel',
+    )) as HTMLInputElement;
+    fireEvent.change(editAgain, { target: { value: 'Discarded Name' } });
+    fireEvent.keyDown(editAgain, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('bots.hierarchy.renameInputLabel')).toBeNull();
+      expect(screen.getByText('Core Ops')).toBeTruthy();
+      expect(screen.queryByText('Discarded Name')).toBeNull();
+    });
+  });
+
+  it('creates nested subfolder, moves to root, and dissolves folder without losing buddies', async () => {
+    mocks.profiles = [
+      bot({ id: 'bot-1', name: 'Alpha' }),
+      bot({ id: 'bot-2', name: 'Beta' }),
+    ];
+
+    await act(async () => {
+      await mutateBotHierarchy((curr) => {
+        const parent = createBotFolder(curr, { id: 'f-parent', name: 'Engineering' });
+        const child = createBotFolder(parent.config, {
+          id: 'f-child',
+          name: 'Frontend',
+          parentId: 'f-parent',
+        });
+        return assignItemsToFolder(child.config, ['bot:bot-1'], 'f-child');
+      });
+    });
+
+    await renderSidebar();
+    expect(screen.getByText('Engineering')).toBeTruthy();
+    expect(screen.getByText('Frontend')).toBeTruthy();
+    expect(screen.getByText('Alpha')).toBeTruthy();
+    expect(screen.getByText('bots.hierarchy.ungrouped')).toBeTruthy();
+
+    // Open folder context menu for Frontend -> move to root.
+    const frontendBtn = screen.getByText('Frontend').closest('button')!;
+    fireEvent.contextMenu(frontendBtn, { clientX: 60, clientY: 60 });
+    const moveToRoot = await screen.findByRole('menuitem', { name: 'bots.hierarchy.moveToRoot' });
+    fireEvent.click(moveToRoot);
+
+    await waitFor(() => {
+      expect(getBotHierarchySnapshot().config.folders['f-child']?.parentId).toBeNull();
+    });
+
+    // Dissolve Frontend folder -> Alpha stays in visible list without data loss.
+    fireEvent.contextMenu(screen.getByText('Frontend').closest('button')!, {
+      clientX: 60,
+      clientY: 60,
+    });
+    const deleteFolder = await screen.findByRole('menuitem', {
+      name: 'bots.hierarchy.deleteFolder',
+    });
+    fireEvent.click(deleteFolder);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Frontend')).toBeNull();
+      expect(getBotHierarchySnapshot().config.folders['f-child']).toBeUndefined();
+      expect(screen.getByText('Alpha')).toBeTruthy();
+      expect(screen.getByText('Beta')).toBeTruthy();
+    });
+
+    // Add a subfolder via Engineering hover action button.
+    const engRow = screen.getByText('Engineering').closest('[data-hierarchy-folder-id="f-parent"]')!;
+    const addSubBtn = engRow.querySelector(
+      'button[aria-label="bots.hierarchy.newSubfolder"]',
+    ) as HTMLButtonElement;
+    fireEvent.click(addSubBtn);
+
+    const subInput = (await screen.findByLabelText(
+      'bots.hierarchy.renameInputLabel',
+    )) as HTMLInputElement;
+    fireEvent.change(subInput, { target: { value: 'Platform' } });
+    fireEvent.keyDown(subInput, { key: 'Enter' });
+
+    await waitFor(() => {
+      const folders = Object.values(getBotHierarchySnapshot().config.folders);
+      const platform = folders.find((folder) => folder.name === 'Platform');
+      expect(platform?.parentId).toBe('f-parent');
+    });
+  });
+
+  it('shows orange breathing icon and aggregated status dot on collapsed folder with running buddy', async () => {
+    mocks.profiles = [bot({ id: 'bot-1', name: 'Worker Bot' })];
+    mocks.islandActivity = new Map([
+      ['bot-1-chat', { sessionId: 'bot-1-chat', phase: 'running' }],
+    ]);
+
+    await act(async () => {
+      await mutateBotHierarchy((curr) => {
+        const created = createBotFolder(curr, { id: 'f-work', name: 'Active Ops' });
+        return assignItemsToFolder(created.config, ['bot:bot-1'], 'f-work');
+      });
+    });
+
+    const view = await renderSidebar();
+    const folderRow = view.container.querySelector('[data-hierarchy-folder-id="f-work"]')!;
+    const folderBtn = screen.getByText('Active Ops').closest('button')!;
+
+    // Expanded initially: icon wrapper should not breathe.
+    expect(folderBtn.getAttribute('aria-expanded')).toBe('true');
+    const iconWrapperBefore = folderRow.querySelector('[data-folder-icon-wrapper="f-work"]')!;
+    expect(iconWrapperBefore.className).not.toContain('session-status-breathing');
+    expect(folderRow.querySelector('[data-folder-status-dot]')).toBeNull();
+
+    // Collapse folder -> icon wrapper breathes accent & right-side aggregated dot renders.
+    fireEvent.click(folderBtn);
+    await waitFor(() => {
+      expect(folderBtn.getAttribute('aria-expanded')).toBe('false');
+      const iconWrapper = folderRow.querySelector('[data-folder-icon-wrapper="f-work"]')!;
+      expect(iconWrapper.className).toContain('text-[var(--status-bar-accent)]');
+      expect(iconWrapper.className).toContain('session-status-breathing');
+      expect(folderRow.querySelector('[data-folder-status-dot="running"]')).not.toBeNull();
+    });
+
+    // Expand all restores expanded state.
+    await openDisplayMenu();
+    const expandAll = await screen.findByRole('menuitem', { name: 'bots.hierarchy.expandAll' });
+    fireEvent.click(expandAll);
+    await waitFor(() => expect(folderBtn.getAttribute('aria-expanded')).toBe('true'));
+
+    await openDisplayMenu();
+    const collapseAll = await screen.findByRole('menuitem', { name: 'bots.hierarchy.collapseAll' });
+    fireEvent.click(collapseAll);
+    await waitFor(() => expect(folderBtn.getAttribute('aria-expanded')).toBe('false'));
+  });
+
+  it('runs smart organize via display menu and notifies empty vs organized result', async () => {
+    const infoSpy = vi.spyOn(toast, 'info').mockImplementation(() => 'toast-info');
+    const successSpy = vi.spyOn(toast, 'success').mockImplementation(() => 'toast-success');
+
+    try {
+      // Single non-prefixed bot -> nothing to smart-organize yet.
+      mocks.profiles = [bot({ id: 'bot-solo', name: 'Solo' })];
+      const view = await renderSidebar();
+
+      await openDisplayMenu();
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'bots.hierarchy.smartOrganize' }));
+      await waitFor(() => {
+        expect(infoSpy).toHaveBeenCalledWith('bots.hierarchy.smartOrganizeEmpty');
+      });
+
+      // Prefixed buddies (`万界｜...`) -> grouped automatically.
+      mocks.profiles = [
+        bot({ id: 'bot-a', name: '万界｜Research' }),
+        bot({ id: 'bot-b', name: '万界｜Builder' }),
+      ];
+      view.rerender(<TeammatesSection />);
+
+      await openDisplayMenu();
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'bots.hierarchy.smartOrganize' }));
+
+      await waitFor(() => {
+        expect(successSpy).toHaveBeenCalledWith('bots.hierarchy.smartOrganizeDone');
+        expect(screen.getByText('万界')).toBeTruthy();
+        expect(screen.getByText('万界｜Research')).toBeTruthy();
+        expect(screen.getByText('万界｜Builder')).toBeTruthy();
+      });
+    } finally {
+      infoSpy.mockRestore();
+      successSpy.mockRestore();
+    }
+  });
+
+  it('toggles group-by-computer and compact single-line density while preserving context menus', async () => {
+    mocks.profiles = [
+      bot({
+        id: 'bot-local',
+        name: 'Local Pal',
+        lastMessagePreview: 'Detailed two-line preview text',
+      }),
+    ];
+    mocks.devices = [
+      { deviceId: 'self-1', name: 'Workstation', isSelf: true },
+      { deviceId: 'mac-2', name: 'MacBook Pro', isSelf: false },
+    ];
+    mocks.remoteBots = [
+      {
+        id: 'bot-remote',
+        deviceId: 'mac-2',
+        deviceName: 'MacBook Pro',
+        name: 'Remote Pal',
+        avatar: '🛰️',
+        avatarColor: 'blue',
+        description: '',
+        preview: 'Remote preview line',
+        activityAt: 1,
+        sessionId: 'mac-2-chat',
+        online: false,
+      },
+    ];
+
+    const view = await renderSidebar();
+    expect(screen.getByText('Detailed two-line preview text')).toBeTruthy();
+
+    // Toggle groupByComputer ON.
+    await openDisplayMenu();
+    const groupCheckbox = await screen.findByRole('menuitemcheckbox', {
+      name: 'bots.hierarchy.groupByComputer',
+    });
+    fireEvent.click(groupCheckbox);
+
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-computer-section="local"]')).not.toBeNull();
+      expect(view.container.querySelector('[data-computer-section="device:mac-2"]')).not.toBeNull();
+      expect(screen.getByText('Workstation')).toBeTruthy();
+      expect(screen.getByText('MacBook Pro')).toBeTruthy();
+      expect(screen.getByText('ccAgent.sidebar.deviceGroup.offline')).toBeTruthy();
+    });
+
+    // Toggle compact single-line density ON -> preview lines hidden, h-8 rows keep context menu.
+    await openDisplayMenu();
+    const compactCheckbox = await screen.findByRole('menuitemcheckbox', {
+      name: 'bots.hierarchy.compactDensity',
+    });
+    fireEvent.click(compactCheckbox);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Detailed two-line preview text')).toBeNull();
+      expect(screen.getByText('Local Pal').closest('button')?.className).toContain('h-8');
+    });
+
+    // Right-clicking compact row still opens context menu with Move to folder submenu.
+    const compactBtn = screen.getByText('Local Pal').closest('button')!;
+    fireEvent.contextMenu(compactBtn, { clientX: 80, clientY: 90 });
+    expect(await screen.findByRole('menuitem', { name: 'bots.list.pin' })).toBeTruthy();
+    expect(await screen.findByRole('menuitem', { name: 'bots.hierarchy.moveToFolder' })).toBeTruthy();
+  });
+
+  it('moves buddy via BotMoveToFolderSubmenu including createAndMove and moveOutOfFolder', async () => {
+    mocks.profiles = [bot({ id: 'bot-1', name: 'Movable Bot' })];
+    await renderSidebar();
+
+    // Context menu -> Move to folder -> Create and move.
+    fireEvent.contextMenu(screen.getByText('Movable Bot').closest('button')!, {
+      clientX: 100,
+      clientY: 120,
+    });
+    const moveTrigger = await screen.findByRole('menuitem', {
+      name: 'bots.hierarchy.moveToFolder',
+    });
+    fireEvent.keyDown(moveTrigger, { key: 'ArrowRight' });
+    const createAndMove = await screen.findByRole('menuitem', {
+      name: 'bots.hierarchy.createAndMove',
+    });
+    fireEvent.click(createAndMove);
+
+    const renameInput = (await screen.findByLabelText(
+      'bots.hierarchy.renameInputLabel',
+    )) as HTMLInputElement;
+    fireEvent.change(renameInput, { target: { value: 'Squad X' } });
+    fireEvent.keyDown(renameInput, { key: 'Enter' });
+
+    await waitFor(() => {
+      const snap = getBotHierarchySnapshot().config;
+      const folderId = resolveItemFolderId(snap, 'bot:bot-1');
+      expect(folderId).toBeTruthy();
+      expect(snap.folders[folderId!]?.name).toBe('Squad X');
+    });
+
+    // Move back out of folder via submenu.
+    fireEvent.contextMenu(screen.getByText('Movable Bot').closest('button')!, {
+      clientX: 100,
+      clientY: 120,
+    });
+    const moveAgain = await screen.findByRole('menuitem', {
+      name: 'bots.hierarchy.moveToFolder',
+    });
+    fireEvent.keyDown(moveAgain, { key: 'ArrowRight' });
+    const moveOut = await screen.findByRole('menuitem', {
+      name: 'bots.hierarchy.moveOutOfFolder',
+    });
+    fireEvent.click(moveOut);
+
+    await waitFor(() => {
+      expect(resolveItemFolderId(getBotHierarchySnapshot().config, 'bot:bot-1')).toBeNull();
+    });
+  });
+
+  it('supports drag-and-drop into folder, sibling reordering, and ungrouping to root', async () => {
+    mocks.profiles = [
+      bot({ id: 'bot-1', name: 'First Buddy', lastMessageAt: 300 }),
+      bot({ id: 'bot-2', name: 'Second Buddy', lastMessageAt: 200 }),
+      bot({ id: 'bot-3', name: 'Third Buddy', lastMessageAt: 100 }),
+    ];
+
+    await act(async () => {
+      await mutateBotHierarchy((curr) => {
+        const created = createBotFolder(curr, { id: 'f-target', name: 'Drop Target' });
+        return assignItemsToFolder(created.config, ['bot:bot-1'], 'f-target');
+      });
+    });
+
+    const view = await renderSidebar();
+    const folderEl = view.container.querySelector('[data-hierarchy-folder-id="f-target"]')!;
+    const bot2El = view.container.querySelector('[data-hierarchy-item-key="bot:bot-2"]')!;
+
+    // Drag Second Buddy onto folder Drop Target.
+    fireEvent.dragStart(bot2El);
+    fireEvent.dragOver(folderEl);
+    fireEvent.drop(folderEl);
+    fireEvent.dragEnd(bot2El);
+
+    await waitFor(() => {
+      expect(resolveItemFolderId(getBotHierarchySnapshot().config, 'bot:bot-2')).toBe('f-target');
+    });
+
+    // Reorder Second Buddy above First Buddy inside Drop Target.
+    const bot1El = view.container.querySelector('[data-hierarchy-item-key="bot:bot-1"]')!;
+    const draggedBot2El = view.container.querySelector('[data-hierarchy-item-key="bot:bot-2"]')!;
+    fireEvent.dragStart(draggedBot2El);
+    fireEvent.dragOver(bot1El);
+    fireEvent.drop(bot1El);
+    fireEvent.dragEnd(draggedBot2El);
+
+    await waitFor(() => {
+      const snap = getBotHierarchySnapshot().config;
+      expect(snap.assignments['bot:bot-2']?.order).toBe(0);
+      expect(snap.assignments['bot:bot-1']?.order).toBe(1);
+      const renderedKeys = Array.from(
+        view.container.querySelectorAll('[data-hierarchy-item-key]'),
+      ).map((el) => el.getAttribute('data-hierarchy-item-key'));
+      expect(renderedKeys.slice(0, 2)).toEqual(['bot:bot-2', 'bot:bot-1']);
+    });
+
+    // Drag Second Buddy onto ungrouped drop heading to remove from folder.
+    const ungroupedZone = view.container.querySelector('[data-hierarchy-ungrouped-drop="true"]')!;
+    const bot2InFolder = view.container.querySelector('[data-hierarchy-item-key="bot:bot-2"]')!;
+    fireEvent.dragStart(bot2InFolder);
+    fireEvent.dragOver(ungroupedZone);
+    fireEvent.drop(ungroupedZone);
+    fireEvent.dragEnd(bot2InFolder);
+
+    await waitFor(() => {
+      expect(resolveItemFolderId(getBotHierarchySnapshot().config, 'bot:bot-2')).toBeNull();
+    });
   });
 });

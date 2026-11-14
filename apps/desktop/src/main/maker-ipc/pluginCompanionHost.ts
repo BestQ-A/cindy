@@ -6,9 +6,15 @@ import type { SessionActivitySnapshot } from '@cindy/maker-shared/session-activi
 import { answerKey, describePermissionAction, encodeMultiSelectAnswer, normalizeAskQuestions } from '@cindy/maker-shared/interaction';
 import type { PluginCompanionAdapter } from '../cindy-brain/pluginCompanionSlot.js';
 import type {
-  PluginCompanion, PluginCompanionAnswer, PluginCompanionHistory, PluginCompanionInteraction, PluginCompanionInteractionDetail, PluginCompanionInteractionKind,
+  PluginCompanion, PluginCompanionAnswer, PluginCompanionFolder, PluginCompanionFolderTreeNode, PluginCompanionHierarchy,
+  PluginCompanionHistory, PluginCompanionInteraction, PluginCompanionInteractionDetail, PluginCompanionInteractionKind,
   PluginCompanionMessage, PluginCompanionReply,
 } from '../../shared/pluginCompanions.js';
+import {
+  botHierarchyItemKey, buildBotFolderTree, flattenFolderOptions, getFolderBreadcrumb, normalizeBotHierarchyConfig,
+  resolveBotFolderId, type BotHierarchyConfigV1, type BotHierarchyFolderTreeNode,
+} from '../../shared/botHierarchy.js';
+import { readBotHierarchyConfig } from './botHierarchyStore.js';
 import { OWNER_ONLY_HOST_CONFIRMATION_TOOL_NAMES } from '../agent-app-update/constants.js';
 import { isSingleBotAvatarGrapheme } from '../../shared/botAvatarValue.js';
 import { getCurrentDbClientSnapshot } from '../localDb/client/current.js';
@@ -181,6 +187,8 @@ export interface PluginCompanionHostDeps {
   confirmAllow?(prompt: PluginCompanionAllowPrompt): Promise<boolean>;
   /** Reading companions whose home is another computer; without it they are listed as unreachable. */
   remote?: PluginCompanionRemoteDeps;
+  /** Optional hierarchy reader override (defaults to owner-scoped main botHierarchyStore). */
+  readHierarchy?: () => BotHierarchyConfigV1;
   now?: () => number;
 }
 
@@ -197,6 +205,123 @@ interface RemoteHomeView extends CompanionView {
   reachable: boolean;
   /** False for an older home that only lists status: no requests or replies. */
   live: boolean;
+}
+
+function companionIdFromHierarchyKey(key: string): string | null {
+  if (key.startsWith('bot:')) return key.slice(4) || null;
+  if (key.startsWith('remote-bot:')) {
+    const rest = key.slice('remote-bot:'.length);
+    const sep = rest.indexOf(':');
+    return sep >= 0 ? rest.slice(sep + 1) || null : null;
+  }
+  return null;
+}
+
+function hasHierarchyEntries(config: BotHierarchyConfigV1): boolean {
+  return (
+    Object.keys(config.folders).length > 0 ||
+    Object.keys(config.assignments).length > 0 ||
+    config.rootOrder.length > 0
+  );
+}
+
+function resolveCompanionAssignment(
+  config: BotHierarchyConfigV1,
+  companionId: string,
+  deviceId?: string | null,
+): { folderId: string | null; order?: number } {
+  const did = typeof deviceId === 'string' ? deviceId.trim() : '';
+  const remoteKey = did ? botHierarchyItemKey(companionId, did) : '';
+  const canonicalKey = botHierarchyItemKey(companionId);
+  const folderId = resolveBotFolderId(config, companionId, did || undefined);
+
+  if (folderId) {
+    const assignment =
+      (remoteKey && Object.prototype.hasOwnProperty.call(config.assignments, remoteKey)
+        ? config.assignments[remoteKey]
+        : undefined) ?? config.assignments[canonicalKey];
+    return { folderId, ...(assignment ? { order: assignment.order } : {}) };
+  }
+
+  const rootIdx = config.rootOrder.findIndex(
+    key => (remoteKey && key === remoteKey) || key === canonicalKey,
+  );
+  if (rootIdx >= 0) {
+    return { folderId: null, order: rootIdx };
+  }
+  const explicitNull =
+    (remoteKey && config.assignments[remoteKey]?.folderId === null
+      ? config.assignments[remoteKey]
+      : undefined) ??
+    (config.assignments[canonicalKey]?.folderId === null
+      ? config.assignments[canonicalKey]
+      : undefined);
+  if (explicitNull) {
+    return { folderId: null, order: explicitNull.order };
+  }
+  return { folderId: null };
+}
+
+function applyHierarchyToCompanion(
+  companion: PluginCompanion,
+  config: BotHierarchyConfigV1,
+  deviceId?: string | null,
+): PluginCompanion {
+  if (!hasHierarchyEntries(config)) return companion;
+  const { folderId, order } = resolveCompanionAssignment(config, companion.id, deviceId);
+  if (folderId) {
+    const groupPath = getFolderBreadcrumb(config, folderId).map(folder => folder.name);
+    return {
+      ...companion,
+      groupId: folderId,
+      groupPath,
+      ...(order !== undefined ? { groupOrder: order } : {}),
+    };
+  }
+  if (order !== undefined) {
+    return { ...companion, groupId: null, groupPath: [], groupOrder: order };
+  }
+  if (Object.keys(config.folders).length > 0) {
+    return { ...companion, groupId: null, groupPath: [] };
+  }
+  return companion;
+}
+
+function buildPluginCompanionHierarchy(config: BotHierarchyConfigV1): PluginCompanionHierarchy {
+  const normalized = normalizeBotHierarchyConfig(config);
+  const folders: PluginCompanionFolder[] = flattenFolderOptions(normalized).map(opt => ({
+    id: opt.id,
+    name: opt.name,
+    parentId: opt.parentId,
+    depth: opt.depth,
+    order: opt.order,
+    path: opt.path,
+  }));
+  const mapTreeNode = (node: BotHierarchyFolderTreeNode): PluginCompanionFolderTreeNode => ({
+    id: node.folder.id,
+    name: node.folder.name,
+    parentId: node.folder.parentId,
+    depth: node.depth,
+    order: node.folder.order,
+    path: node.path,
+    children: node.children.map(mapTreeNode),
+  });
+  const tree = buildBotFolderTree(normalized).map(mapTreeNode);
+  const rootOrder: string[] = [];
+  const seen = new Set<string>();
+  for (const key of normalized.rootOrder) {
+    const companionId = companionIdFromHierarchyKey(key);
+    if (companionId && !seen.has(companionId)) {
+      seen.add(companionId);
+      rootOrder.push(companionId);
+    }
+  }
+  return {
+    folders,
+    tree,
+    rootOrder,
+    ...(normalized.updatedAt > 0 ? { updatedAt: normalized.updatedAt } : {}),
+  };
 }
 
 const offlineCompanion = (id: string, name: string, deviceName: string | null): PluginCompanion => ({
@@ -486,26 +611,40 @@ export function createPluginCompanionHost(deps: PluginCompanionHostDeps) {
   // One Cindy confirmation at a time: a second one would stack dialogs the owner did not ask for.
   let confirming = false;
 
+  const readConfig = () => normalizeBotHierarchyConfig((deps.readHierarchy ?? readBotHierarchyConfig)());
+
   const adapter: PluginCompanionAdapter = {
     async list(guard) {
       const local = await localView(guard);
       const byHome = remoteActors(new Set(local.companions.map(companion => companion.id)));
-      if (byHome.size === 0) return local.companions;
+      if (byHome.size === 0) {
+        const config = readConfig();
+        return local.companions.map(companion => applyHierarchyToCompanion(companion, config));
+      }
       const devices = await homeDevices(guard);
       const homes = await Promise.all([...byHome].map(async ([deviceId, actors]) => {
         const device = devices.get(deviceId);
         const view = device?.online && device.reachable ? await readHome(deviceId, device.name) : unreachableHome();
-        return { actors, view, deviceName: device?.name ?? null };
+        return { deviceId, actors, view, deviceName: device?.name ?? null };
       }));
       guard();
-      const remote = homes.flatMap(({ actors, view, deviceName }) => actors.flatMap((actor): PluginCompanion[] => {
-        if (!view.reachable) return [offlineCompanion(actor.id, actor.name, deviceName)];
+      const config = readConfig();
+      const localList = local.companions.map(companion => applyHierarchyToCompanion(companion, config));
+      const remote = homes.flatMap(({ deviceId, actors, view, deviceName }) => actors.flatMap((actor): PluginCompanion[] => {
+        if (!view.reachable) {
+          return [applyHierarchyToCompanion(offlineCompanion(actor.id, actor.name, deviceName), config, deviceId)];
+        }
         const companion = view.companions.find(item => item.id === actor.id);
         // Reachable but not listed there: hidden, archived or moving; the sidebar does not show it either.
         if (!companion) return [];
-        return [{ ...companion, name: companion.name || actor.name }];
+        return [applyHierarchyToCompanion({ ...companion, name: companion.name || actor.name }, config, deviceId)];
       }));
-      return [...local.companions, ...remote];
+      return [...localList, ...remote];
+    },
+
+    async hierarchy(guard) {
+      guard();
+      return buildPluginCompanionHierarchy(readConfig());
     },
 
     async avatar(companionId, guard) {

@@ -12265,6 +12265,31 @@
       "toggle": "启用「{{name}}」",
       "manage": "在自动化页面管理",
       "create": "去自动化页面新建"
+    },
+    "hierarchy": {
+      "menuTrigger": "显示设置",
+      "newFolder": "新建文件夹",
+      "newSubfolder": "新建子文件夹",
+      "defaultFolderName": "未命名文件夹",
+      "smartOrganize": "智能整理",
+      "smartOrganizeDone": "已整理伙伴分组",
+      "smartOrganizeEmpty": "暂无可整理的伙伴",
+      "groupByComputer": "按电脑分组",
+      "compactDensity": "单行紧凑视图",
+      "expandAll": "全部展开",
+      "collapseAll": "全部收起",
+      "renameFolder": "重命名文件夹",
+      "renameInputLabel": "文件夹名称",
+      "deleteFolder": "删除文件夹",
+      "moveToFolder": "移动到文件夹",
+      "moveOutOfFolder": "移出文件夹",
+      "moveToRoot": "移至顶层",
+      "createAndMove": "新建并移入",
+      "ungrouped": "未分组",
+      "localComputer": "本机",
+      "selectGroupAll": "全选本组",
+      "deselectGroupAll": "取消全选本组",
+      "searchMembersPlaceholder": "搜索伙伴…"
     }
   },
   "common": {

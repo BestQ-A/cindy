@@ -2,6 +2,14 @@
 import { cleanup, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  assignItemsToFolder,
+  botHierarchyItemKey,
+  createBotFolder,
+  createEmptyBotHierarchyConfig,
+  groupHierarchyItemKey,
+} from '../../../../shared/botHierarchy';
+import { mutateBotHierarchy, resetBotHierarchyStoreForTests } from '../botHierarchyClientStore';
 import { TeammateSearchResults, useTeammateSearchMatches } from '../TeammateSearchResults';
 
 const mocks = vi.hoisted(() => ({
@@ -25,6 +33,7 @@ function bot(id: string, name: string, extra: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  resetBotHierarchyStoreForTests();
   mocks.cloud = { enabled: false, selfDeviceId: null, humanActorId: null, actors: [], demotedBotIds: [] };
   mocks.profiles = [
     bot('steward', 'PR steward', { skills: ['web-research'] }),
@@ -41,6 +50,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  resetBotHierarchyStoreForTests();
   mocks.navigate.mockReset();
 });
 
@@ -135,5 +145,76 @@ describe('teammates in the sidebar-wide search', () => {
     fireEvent.click(screen.getByRole('button', { name: /周末出游/ }));
     expect(mocks.navigate).toHaveBeenLastCalledWith('/bots/groups/trip');
     expect(screen.getByText('bots.groupChat.sidebar.title')).toBeTruthy();
+  });
+
+  it('matches local bots, remote bots, and groups by folder name and full breadcrumb path', async () => {
+    await mutateBotHierarchy(() => {
+      let config = createEmptyBotHierarchyConfig(100);
+      const rootRes = createBotFolder(config, { id: 'root-wj', name: '万界', now: 101 });
+      config = rootRes.config;
+      const devRes = createBotFolder(config, { id: 'sub-dev', name: '技术研发', parentId: 'root-wj', now: 102 });
+      config = devRes.config;
+      config = assignItemsToFolder(
+        config,
+        [
+          botHierarchyItemKey('writer'),
+          botHierarchyItemKey('cloud', 'mac-mini'),
+          groupHierarchyItemKey('trip'),
+        ],
+        'sub-dev',
+        { now: 103 },
+      );
+      return config;
+    });
+
+    expect(names('技术研发')).toEqual(['Writer', 'Cloud helper', '周末出游']);
+    expect(names('万界')).toEqual(['Writer', 'Cloud helper', '周末出游']);
+    expect(names('万界 / 技术研发')).toEqual(['Writer', 'Cloud helper', '周末出游']);
+    expect(names('万界/技术研发')).toEqual(['Writer', 'Cloud helper', '周末出游']);
+
+    const { result } = renderHook(() => useTeammateSearchMatches('技术研发', null));
+    expect(result.current.map((match) => match.breadcrumb)).toEqual([
+      ['万界', '技术研发'],
+      ['万界', '技术研发'],
+      ['万界', '技术研发'],
+    ]);
+
+    render(<TeammateSearchResults matches={result.current} />);
+    expect(screen.getAllByText('万界 / 技术研发')).toHaveLength(3);
+  });
+
+  it('omits breadcrumb for ungrouped hits while displaying it for grouped hits', async () => {
+    await mutateBotHierarchy(() => {
+      let config = createEmptyBotHierarchyConfig(200);
+      const rootRes = createBotFolder(config, { id: 'f-ops', name: '运营组', now: 201 });
+      config = rootRes.config;
+      config = assignItemsToFolder(config, [botHierarchyItemKey('hidden')], 'f-ops', { now: 202 });
+      return config;
+    });
+
+    const { result } = renderHook(() => useTeammateSearchMatches('steward', null));
+    render(<TeammateSearchResults matches={result.current} />);
+
+    const groupedBtn = screen.getByRole('button', { name: /Hidden release steward/ });
+    const ungroupedBtn = screen.getByRole('button', { name: /PR steward/ });
+    expect(groupedBtn.querySelector('[data-teammate-breadcrumb]')?.textContent).toBe('运营组');
+    expect(ungroupedBtn.querySelector('[data-teammate-breadcrumb]')).toBeNull();
+  });
+
+  it('respects remote-bot explicit unassignment while falling back to canonical bot assignment when unset', async () => {
+    mocks.remoteBots = [
+      { id: 'cloud', deviceId: 'mac-mini', deviceName: 'Mac mini', name: 'Cloud mac', description: '', activityAt: 1 },
+      { id: 'cloud', deviceId: 'win-box', deviceName: 'Win box', name: 'Cloud win', description: '', activityAt: 2 },
+    ];
+    await mutateBotHierarchy(() => {
+      let config = createEmptyBotHierarchyConfig(300);
+      const folder = createBotFolder(config, { id: 'f-core', name: '核心研发', now: 301 });
+      config = folder.config;
+      config = assignItemsToFolder(config, [botHierarchyItemKey('cloud')], 'f-core', { now: 302 });
+      config = assignItemsToFolder(config, [botHierarchyItemKey('cloud', 'mac-mini')], null, { now: 303 });
+      return config;
+    });
+
+    expect(names('核心研发')).toEqual(['Cloud win']);
   });
 });

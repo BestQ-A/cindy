@@ -1,0 +1,423 @@
+{
+  "roster": [
+    {
+      "id": "import_093b35db1613edc399993767",
+      "name": "万界｜总协调（SECRETARY）"
+    },
+    {
+      "id": "import_03b3397f14f8c41b0ab4c150",
+      "name": "万界｜主美（A01）"
+    },
+    {
+      "id": "import_b1c2b7b8b4c6c11df1929c7d",
+      "name": "万界｜主角美术（A02）"
+    },
+    {
+      "id": "import_6a1ba9cde70aa8c4861a6876",
+      "name": "万界｜敌人美术（A03）"
+    },
+    {
+      "id": "import_37b1d34a01f1c71c96aeb7bc",
+      "name": "万界｜场景美术（A04）"
+    },
+    {
+      "id": "import_dfdda6b9cdc964783aaef04e",
+      "name": "万界｜UI / 特效（A05）"
+    },
+    {
+      "id": "import_6392e591a3468d70d682d919",
+      "name": "万界｜画面验收（A12）"
+    },
+    {
+      "id": "import_56a8d262738798acc41b53cf",
+      "name": "万界｜音频（AU01）"
+    },
+    {
+      "id": "import_505afdcb9abf85dfa4665ab0",
+      "name": "万界｜发行（BD01）"
+    },
+    {
+      "id": "import_2d456726037b19cfbbd3d1ae",
+      "name": "万界｜主策划（D01）"
+    },
+    {
+      "id": "import_3298e5ad8a305bcf9ba35658",
+      "name": "万界｜剧情文案（D02）"
+    },
+    {
+      "id": "import_4dffe445fb2d10071661a323",
+      "name": "万界｜战斗 3C（D03）"
+    },
+    {
+      "id": "import_e2c19715674d9a049c61e1e8",
+      "name": "万界｜数值（D04）"
+    },
+    {
+      "id": "import_bd5e8d725637c3cec88b2cd5",
+      "name": "万界｜数据分析（DA01）"
+    },
+    {
+      "id": "import_0b444e966fad5c0c584d9c88",
+      "name": "万界｜财务（FN01）"
+    },
+    {
+      "id": "import_0c8dfc68cc16377f569dceb8",
+      "name": "万界｜HR（H01）"
+    },
+    {
+      "id": "import_fdfc3335048b82c25f1f0869",
+      "name": "万界｜工程效能（HB01）"
+    },
+    {
+      "id": "import_9777cacaeb306b700ac1d8c5",
+      "name": "万界｜飞书协同（HB02）"
+    },
+    {
+      "id": "import_307cceed0d71c8fc0487311e",
+      "name": "万界｜配置管线（HB03）"
+    },
+    {
+      "id": "import_31f0f56c6f1d1c7874c5be08",
+      "name": "万界｜小游戏适配（HB04）"
+    },
+    {
+      "id": "import_669401585af1d8d4804e5f6c",
+      "name": "万界｜构建发布（HB05）"
+    },
+    {
+      "id": "import_edf8a90eed5028fbff990279",
+      "name": "万界｜法务（LG01）"
+    },
+    {
+      "id": "import_ba0051b4909dad989a6d8326",
+      "name": "万界｜制作人（M01）"
+    },
+    {
+      "id": "import_cc879a8ba8046a47882cb595",
+      "name": "万界｜市场调研（MR01）"
+    },
+    {
+      "id": "import_583f0043f0e0a48fdac4ae12",
+      "name": "万界｜运营（OP01）"
+    },
+    {
+      "id": "import_0ec70b148a49cec7cef37df6",
+      "name": "万界｜主程（P01）"
+    },
+    {
+      "id": "import_bf272dc98c967d7639e61e97",
+      "name": "万界｜渲染（P02）"
+    },
+    {
+      "id": "import_2f781fdc130204b4a6d1c0d9",
+      "name": "万界｜章节玩法（P03_IMPL）"
+    },
+    {
+      "id": "import_2b7f41adf972664c8b6b47f1",
+      "name": "万界｜核心规则（P04_CORE）"
+    },
+    {
+      "id": "import_f760541c3776f9334870ccfb",
+      "name": "万界｜掉落交互（P05_VIS）"
+    },
+    {
+      "id": "import_3905f072b2e8164a709437c8",
+      "name": "万界｜房间拓扑（P06_TOPO）"
+    },
+    {
+      "id": "import_fd964fecaeb15b4ce61ffb38",
+      "name": "万界｜敌人 AI（P07）"
+    },
+    {
+      "id": "import_e1f8deafc972b062c5b059b7",
+      "name": "万界｜增长 PM（PM01）"
+    },
+    {
+      "id": "import_b17f07178f11cc02b3e744d0",
+      "name": "万界｜QA 组长（Q01）"
+    },
+    {
+      "id": "import_62bb32baf94b5a8431cb2cdc",
+      "name": "万界｜盲测（Q03_BLIND）"
+    }
+  ],
+  "devices": [
+    {
+      "name": "KEMOVE",
+      "cpu": "12th Gen Intel(R) Core(TM) i9-12900K",
+      "memoryGiB": 127.8,
+      "checkedAt": "2026-11-14T19:05:00.3875063+08:00",
+      "ip": "100.67.51.74",
+      "gpu": "NVIDIA GeForce RTX 3090",
+      "role": "主控"
+    },
+    {
+      "name": "WIN-7V2K751SF9R",
+      "ip": "100.88.177.127",
+      "cpu": "AMD Ryzen 9 9955HX3D",
+      "memoryGiB": 31.1,
+      "gpu": "NVIDIA GeForce RTX 5080 Laptop GPU",
+      "role": "Cindy 工作节点",
+      "checkedAt": "2026-11-14T17:51:14+08:00"
+    },
+    {
+      "name": "optix-display",
+      "ip": "100.66.124.109",
+      "cpu": "Intel Core i9-13900HX",
+      "memoryGiB": 80,
+      "gpu": "NVIDIA GeForce RTX 4090 Laptop GPU",
+      "role": "Cindy 工作节点",
+      "checkedAt": "2026-11-14T18:37:11+08:00"
+    }
+  ],
+  "verification": {
+    "checkedAt": "2026-11-14T11:18:20.331Z",
+    "results": [
+      {
+        "companionId": "import_093b35db1613edc399993767",
+        "name": "万界｜总协调（SECRETARY）",
+        "status": "passed",
+        "summary": "实际读取本岗职责行，身份与评审人核对通过",
+        "checkedAt": "2026-11-14T11:18:20.322Z"
+      },
+      {
+        "companionId": "import_03b3397f14f8c41b0ab4c150",
+        "name": "万界｜主美（A01）",
+        "status": "passed",
+        "summary": "实际读取本岗职责行，身份与评审人核对通过",
+        "checkedAt": "2026-11-14T11:18:20.323Z"
+      },
+      {
+        "companionId": "import_b1c2b7b8b4c6c11df1929c7d",
+        "name": "万界｜主角美术（A02）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.325Z"
+      },
+      {
+        "companionId": "import_6a1ba9cde70aa8c4861a6876",
+        "name": "万界｜敌人美术（A03）",
+        "status": "blocked",
+        "summary": "首次Bridge转交缺少有效用户委派来源，读取被自动审批拒绝；已停止等待正规重试",
+        "checkedAt": "2026-11-14T11:18:20.325Z"
+      },
+      {
+        "companionId": "import_37b1d34a01f1c71c96aeb7bc",
+        "name": "万界｜场景美术（A04）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.327Z"
+      },
+      {
+        "companionId": "import_dfdda6b9cdc964783aaef04e",
+        "name": "万界｜UI / 特效（A05）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.327Z"
+      },
+      {
+        "companionId": "import_6392e591a3468d70d682d919",
+        "name": "万界｜画面验收（A12）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.327Z"
+      },
+      {
+        "companionId": "import_56a8d262738798acc41b53cf",
+        "name": "万界｜音频（AU01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.327Z"
+      },
+      {
+        "companionId": "import_505afdcb9abf85dfa4665ab0",
+        "name": "万界｜发行（BD01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.327Z"
+      },
+      {
+        "companionId": "import_2d456726037b19cfbbd3d1ae",
+        "name": "万界｜主策划（D01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.327Z"
+      },
+      {
+        "companionId": "import_3298e5ad8a305bcf9ba35658",
+        "name": "万界｜剧情文案（D02）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_4dffe445fb2d10071661a323",
+        "name": "万界｜战斗 3C（D03）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_e2c19715674d9a049c61e1e8",
+        "name": "万界｜数值（D04）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_bd5e8d725637c3cec88b2cd5",
+        "name": "万界｜数据分析（DA01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_0b444e966fad5c0c584d9c88",
+        "name": "万界｜财务（FN01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_0c8dfc68cc16377f569dceb8",
+        "name": "万界｜HR（H01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_fdfc3335048b82c25f1f0869",
+        "name": "万界｜工程效能（HB01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_9777cacaeb306b700ac1d8c5",
+        "name": "万界｜飞书协同（HB02）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_307cceed0d71c8fc0487311e",
+        "name": "万界｜配置管线（HB03）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_31f0f56c6f1d1c7874c5be08",
+        "name": "万界｜小游戏适配（HB04）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_669401585af1d8d4804e5f6c",
+        "name": "万界｜构建发布（HB05）",
+        "status": "blocked",
+        "summary": "首次Bridge转交缺少有效用户委派来源，读取被自动审批拒绝；已停止等待正规重试",
+        "checkedAt": "2026-11-14T11:18:20.328Z"
+      },
+      {
+        "companionId": "import_edf8a90eed5028fbff990279",
+        "name": "万界｜法务（LG01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_ba0051b4909dad989a6d8326",
+        "name": "万界｜制作人（M01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_cc879a8ba8046a47882cb595",
+        "name": "万界｜市场调研（MR01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_583f0043f0e0a48fdac4ae12",
+        "name": "万界｜运营（OP01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_0ec70b148a49cec7cef37df6",
+        "name": "万界｜主程（P01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_bf272dc98c967d7639e61e97",
+        "name": "万界｜渲染（P02）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_2f781fdc130204b4a6d1c0d9",
+        "name": "万界｜章节玩法（P03_IMPL）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_2b7f41adf972664c8b6b47f1",
+        "name": "万界｜核心规则（P04_CORE）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_f760541c3776f9334870ccfb",
+        "name": "万界｜掉落交互（P05_VIS）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_3905f072b2e8164a709437c8",
+        "name": "万界｜房间拓扑（P06_TOPO）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_fd964fecaeb15b4ce61ffb38",
+        "name": "万界｜敌人 AI（P07）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_e1f8deafc972b062c5b059b7",
+        "name": "万界｜增长 PM（PM01）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_b17f07178f11cc02b3e744d0",
+        "name": "万界｜QA 组长（Q01）",
+        "status": "passed",
+        "summary": "实际读取本岗职责行，身份与评审人核对通过",
+        "checkedAt": "2026-11-14T11:18:20.330Z"
+      },
+      {
+        "companionId": "import_62bb32baf94b5a8431cb2cdc",
+        "name": "万界｜盲测（Q03_BLIND）",
+        "status": "pending",
+        "summary": "等待正式插件委派",
+        "checkedAt": "2026-11-14T11:18:20.331Z"
+      }
+    ]
+  }
+}

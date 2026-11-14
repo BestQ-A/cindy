@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { GhostPipeCompanionsChanged } from '../../shared/ghost.js';
 import type {
-  PluginCompanion, PluginCompanionAnswer, PluginCompanionAvatar, PluginCompanionHistory, PluginCompanionInteractionDetail, PluginCompanionReply,
+  PluginCompanion, PluginCompanionAnswer, PluginCompanionAvatar, PluginCompanionHierarchy, PluginCompanionHistory,
+  PluginCompanionInteractionDetail, PluginCompanionReply,
 } from '../../shared/pluginCompanions.js';
 
 export interface PluginCompanionAdapter {
   list(guard: () => void): Promise<PluginCompanion[]>;
+  /** Optional multi-level folder hierarchy matching the listed companions. */
+  hierarchy?(guard: () => void): Promise<PluginCompanionHierarchy> | PluginCompanionHierarchy;
   avatar(companionId: string, guard: () => void): Promise<PluginCompanionAvatar>;
   reply(companionId: string, guard: () => void): Promise<PluginCompanionReply | null>;
   /** The latest messages of the main conversation; null when the companion's home cannot be asked for them. */
@@ -79,7 +82,19 @@ export async function handlePluginCompanionRequest(
       case 'list': {
         const companions = await adapter.list(ctx.assertAuthorized);
         ctx.assertAuthorized();
-        return { ok: true as const, data: { companions, observedAt: Date.now() } };
+        const hierarchy: PluginCompanionHierarchy = typeof adapter.hierarchy === 'function'
+          ? await adapter.hierarchy(ctx.assertAuthorized)
+          : { folders: [], tree: [], rootOrder: [] };
+        ctx.assertAuthorized();
+        return {
+          ok: true as const,
+          data: {
+            companions,
+            folders: hierarchy.folders,
+            hierarchy,
+            observedAt: Date.now(),
+          },
+        };
       }
       case 'avatar': {
         const companionId = idParam(request.companionId);

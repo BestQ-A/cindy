@@ -1430,3 +1430,292 @@ it('routes Pi version checks and exact-version installs to the managed runtime',
     expect(call).toHaveBeenCalledTimes(2);
   } finally { await client.close(); await server.close(); }
 });
+
+describe('teammate_groups tools', () => {
+  it('exposes get_teammate_groups and organize_teammate_groups on bot surface while keeping ordinary default surface restricted to list_agents', async () => {
+    let surface: 'bot' | 'default' | 'restricted' = 'default';
+    const get = vi.fn(async () => ({
+      ok: true as const,
+      version: 1,
+      updatedAt: '2026-11-14T12:00:00.000Z',
+      maxDepth: 6,
+      maxFolders: 200,
+      stats: {
+        totalFolders: 1,
+        totalTeammates: 2,
+        groupedCount: 1,
+        ungroupedCount: 1,
+        matchedTeammates: 2,
+        matchedFolders: 1,
+      },
+      tree: [],
+      folders: [],
+      teammates: [],
+      ungrouped: [],
+    }));
+    const organize = vi.fn(async () => ({
+      ok: true as const,
+      dryRun: true,
+      applied: false,
+      mode: 'smart' as const,
+      updatedAt: '2026-11-14T12:00:00.000Z',
+      summary: {
+        foldersCreated: 1,
+        foldersRenamed: 0,
+        foldersMoved: 0,
+        foldersDeleted: 0,
+        teammatesMoved: 1,
+        teammatesAssigned: 1,
+        teammatesUnassigned: 0,
+        unchangedTeammates: 0,
+        unmatchedRules: 0,
+        warnings: [],
+      },
+      folderChanges: [],
+      assignmentChanges: [],
+      tree: [],
+      stats: {
+        totalFolders: 1,
+        totalTeammates: 1,
+        groupedCount: 1,
+        ungroupedCount: 0,
+        matchedTeammates: 1,
+        matchedFolders: 1,
+      },
+    }));
+    const server = createXdtHelperMcpServer({
+      resolveSurface: async () => surface,
+      botMessaging: {
+        listAgents: async () => ({ ok: true as const, agents: [], unavailableDevices: [] }),
+        sendToUser: async () => ({ ok: true as const, messageId: 'm1', targetSessionId: 'sess-1', delivered: true }),
+      },
+      teammateGroups: { get, organize },
+    }, { agentKind: 'codex', workingDir: '/repo', sessionId: 'sess-1' });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'teammate-groups-surface-test', version: '1' });
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    try {
+      const defaultBots = parsePayload(await client.callTool({ name: 'list_tools', arguments: { category: 'bots' } }));
+      expect((defaultBots.tools as Array<{ name: string }>).map(t => t.name)).toEqual(['list_agents']);
+      expect(parsePayload(await client.callTool({ name: 'call_tool', arguments: { name: 'get_teammate_groups', args: {} } })))
+        .toMatchObject({ ok: false, errorCode: 'CAPABILITY_NOT_AVAILABLE' });
+      expect(parsePayload(await client.callTool({ name: 'organize_teammate_groups', arguments: { smart: true } })))
+        .toMatchObject({ ok: false, errorCode: 'CAPABILITY_NOT_AVAILABLE' });
+      expect(get).not.toHaveBeenCalled();
+      expect(organize).not.toHaveBeenCalled();
+
+      surface = 'bot';
+      const botDirectNames = (await client.listTools()).tools.map(t => t.name);
+      expect(botDirectNames).toEqual(expect.arrayContaining(['get_teammate_groups', 'organize_teammate_groups']));
+      const botCatTools = parsePayload(await client.callTool({ name: 'list_tools', arguments: { category: 'bots' } }));
+      expect((botCatTools.tools as Array<{ name: string }>).map(t => t.name))
+        .toEqual(expect.arrayContaining(['get_teammate_groups', 'organize_teammate_groups']));
+      expect(parsePayload(await client.callTool({ name: 'list_tools', arguments: { key: 'teammates.management' } })))
+        .toMatchObject({
+          control: {
+            operations: expect.arrayContaining([
+              expect.objectContaining({ name: 'get_teammate_groups' }),
+              expect.objectContaining({ name: 'organize_teammate_groups' }),
+            ]),
+          },
+        });
+      expect(parsePayload(await client.callTool({ name: 'list_tools', arguments: { query: '智能分组' } })))
+        .toMatchObject({
+          items: expect.arrayContaining([expect.objectContaining({ key: 'teammates.management' })]),
+        });
+
+      expect(parsePayload(await client.callTool({
+        name: 'get_teammate_groups',
+        arguments: { path: '万界/策划组', kind: 'local', ungrouped_only: false },
+      }))).toMatchObject({ ok: true, stats: { totalFolders: 1 } });
+      expect(get).toHaveBeenCalledWith({
+        callerSessionId: 'sess-1',
+        path: '万界/策划组',
+        includeDescendants: true,
+        kind: 'local',
+        ungroupedOnly: false,
+        includeEmptyFolders: true,
+      });
+
+      surface = 'restricted';
+      expect(parsePayload(await client.callTool({ name: 'call_tool', arguments: { name: 'get_teammate_groups', args: {} } })))
+        .toMatchObject({ ok: false, errorCode: 'CAPABILITY_NOT_AVAILABLE' });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it('exposes and executes get_teammate_groups and organize_teammate_groups directly on claude-code bot-main surface', async () => {
+    const get = vi.fn(async () => ({
+      ok: true as const,
+      version: 1,
+      updatedAt: '2026-11-14T12:00:00.000Z',
+      maxDepth: 6,
+      maxFolders: 200,
+      stats: { totalFolders: 0, totalTeammates: 0, groupedCount: 0, ungroupedCount: 0, matchedTeammates: 0, matchedFolders: 0 },
+      tree: [],
+      folders: [],
+      teammates: [],
+      ungrouped: [],
+    }));
+    const organize = vi.fn(async () => ({
+      ok: true as const,
+      dryRun: false,
+      applied: true,
+      mode: 'smart' as const,
+      updatedAt: '2026-11-14T12:00:00.000Z',
+      summary: {
+        foldersCreated: 0, foldersRenamed: 0, foldersMoved: 0, foldersDeleted: 0,
+        teammatesMoved: 0, teammatesAssigned: 0, teammatesUnassigned: 0, unchangedTeammates: 0, unmatchedRules: 0, warnings: [],
+      },
+      folderChanges: [],
+      assignmentChanges: [],
+      tree: [],
+      stats: { totalFolders: 0, totalTeammates: 0, groupedCount: 0, ungroupedCount: 0, matchedTeammates: 0, matchedFolders: 0 },
+    }));
+    const server = createXdtHelperMcpServer({
+      resolveSurface: async () => 'bot-main',
+      teammateGroups: { get, organize },
+    }, { agentKind: 'claude-code', workingDir: '/repo', sessionId: 'cc-bot-main' });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'teammate-groups-cc-test', version: '1' });
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    try {
+      const names = (await client.listTools()).tools.map(t => t.name);
+      expect(names).toEqual(expect.arrayContaining(['get_teammate_groups', 'organize_teammate_groups']));
+      expect(parsePayload(await client.callTool({ name: 'organize_teammate_groups', arguments: { smart: true } })))
+        .toMatchObject({ ok: true, applied: true, mode: 'smart' });
+      expect(organize).toHaveBeenCalledWith({
+        callerSessionId: 'cc-bot-main',
+        smart: true,
+        dryRun: false,
+        replaceExisting: false,
+        ungroupedOnly: false,
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it('validates and forwards smart, rules, and operations arguments for organize_teammate_groups', async () => {
+    const get = vi.fn(async () => ({
+      ok: true as const,
+      version: 1,
+      updatedAt: '2026-11-14T12:00:00.000Z',
+      maxDepth: 6,
+      maxFolders: 200,
+      stats: { totalFolders: 0, totalTeammates: 0, groupedCount: 0, ungroupedCount: 0, matchedTeammates: 0, matchedFolders: 0 },
+      tree: [],
+      folders: [],
+      teammates: [],
+      ungrouped: [],
+    }));
+    const organize = vi.fn(async (params) => ({
+      ok: true as const,
+      dryRun: params.dryRun,
+      applied: !params.dryRun,
+      mode: params.smart && (params.rules?.length || params.operations?.length)
+        ? ('mixed' as const)
+        : params.smart
+          ? ('smart' as const)
+          : params.rules?.length
+            ? ('rules' as const)
+            : ('operations' as const),
+      updatedAt: '2026-11-14T12:00:00.000Z',
+      summary: {
+        foldersCreated: 2,
+        foldersRenamed: 0,
+        foldersMoved: 0,
+        foldersDeleted: 0,
+        teammatesMoved: 3,
+        teammatesAssigned: 3,
+        teammatesUnassigned: 0,
+        unchangedTeammates: 0,
+        unmatchedRules: 0,
+        warnings: [],
+      },
+      folderChanges: [],
+      assignmentChanges: [],
+      tree: [],
+      stats: { totalFolders: 2, totalTeammates: 3, groupedCount: 3, ungroupedCount: 0, matchedTeammates: 3, matchedFolders: 2 },
+    }));
+    const server = createXdtHelperMcpServer({
+      resolveSurface: async () => 'bot',
+      teammateGroups: { get, organize },
+    }, { agentKind: 'pi', workingDir: '/repo', sessionId: 'bot-session' });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'teammate-groups-organize-test', version: '1' });
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    const call = async (name: string, args: Record<string, unknown>) =>
+      parsePayload(await client.callTool({ name: 'call_tool', arguments: { name, args } }));
+    try {
+      expect(await call('organize_teammate_groups', {})).toMatchObject({ ok: false, errorCode: 'INVALID_ARGS' });
+      expect(await call('organize_teammate_groups', {
+        rules: [{ regex: '[unclosed', target_path: '万界/研发组' }],
+      })).toMatchObject({ ok: false, errorCode: 'INVALID_ARGS' });
+      expect(await call('organize_teammate_groups', {
+        rules: [{ prefix: '万界｜P' }],
+      })).toMatchObject({ ok: false, errorCode: 'INVALID_ARGS' });
+      expect(organize).not.toHaveBeenCalled();
+
+      expect(await call('organize_teammate_groups', {
+        smart: true,
+        dry_run: true,
+        replace_existing: false,
+        ungrouped_only: true,
+        bot_ids: { item: 'bot-p1' },
+      })).toMatchObject({ ok: true, dryRun: true, applied: false, mode: 'smart' });
+      expect(organize).toHaveBeenLastCalledWith({
+        callerSessionId: 'bot-session',
+        smart: true,
+        dryRun: true,
+        replaceExisting: false,
+        ungroupedOnly: true,
+        botIds: ['bot-p1'],
+      });
+
+      expect(await call('organize_teammate_groups', {
+        rules: [
+          { prefix: '万界｜P', target_path: '万界/策划组' },
+          { role: 'D', target_path: '万界/研发组', overwrite_existing: false },
+          { regex: '^万界｜M', folder_id: 'f-mgmt' },
+          { bot_ids: ['bot-9'], unassign: true },
+        ],
+        operations: [
+          { op: 'create_folder', path: '万界/策划组' },
+          { op: 'rename_folder', path: '万界/旧组', new_name: '新组' },
+          { op: 'move_folder', folder_id: 'f-1', to_root: true },
+          { op: 'delete_folder', folder_id: 'f-2', reparent_to_parent: false },
+          { op: 'assign', bot_ids: { item: ['bot-a', 'bot-b'] }, target_path: '日常/助手' },
+          { op: 'unassign', bot_ids: ['bot-c'] },
+        ],
+      })).toMatchObject({ ok: true, applied: true });
+      expect(organize).toHaveBeenLastCalledWith({
+        callerSessionId: 'bot-session',
+        smart: false,
+        dryRun: false,
+        replaceExisting: false,
+        ungroupedOnly: false,
+        rules: [
+          { prefix: '万界｜P', targetPath: '万界/策划组' },
+          { role: 'D', targetPath: '万界/研发组', overwriteExisting: false },
+          { regex: '^万界｜M', folderId: 'f-mgmt' },
+          { botIds: ['bot-9'], unassign: true },
+        ],
+        operations: [
+          { op: 'create_folder', path: '万界/策划组' },
+          { op: 'rename_folder', path: '万界/旧组', newName: '新组' },
+          { op: 'move_folder', folderId: 'f-1', toRoot: true },
+          { op: 'delete_folder', folderId: 'f-2', reparentToParent: false },
+          { op: 'assign', botIds: ['bot-a', 'bot-b'], targetPath: '日常/助手' },
+          { op: 'unassign', botIds: ['bot-c'] },
+        ],
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});

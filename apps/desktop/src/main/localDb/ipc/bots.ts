@@ -2,6 +2,7 @@ import { emitSessionCreated } from './sessionCreatedBroadcast.js';
 import { isSubagentParentToolUseId } from '@cindy/maker-shared/message-render';
 import { loadBotReadState, loadAcknowledgedBotReadState, readBotReadPosition } from '../../maker-ipc/botReadStateStore.js';
 import { registerBotReadStateIpc } from '../../maker-ipc/botReadStateIpc.js';
+import { registerBotHierarchyIpc } from '../../maker-ipc/botHierarchyStore.js';
 import { botLinkedProjectAccess } from '../../maker-ipc/botLinkedProjects.js';
 /** Cindy Bots 的 main-side 权威数据边界。
  *
@@ -2444,6 +2445,7 @@ export async function searchBotHistory(botId: string, query: string, limit: numb
 
 export function registerBotIpc(): void {
   registerBotReadStateIpc();
+  registerBotHierarchyIpc();
   ipcMain.handle('local-db:bots:generate-avatar', async (event, token: unknown) => {
     assertTrustedAppRendererEvent(event);
     if (typeof token !== 'string') throwIpcError('INVALID_PARAMS', 'Invalid draft');

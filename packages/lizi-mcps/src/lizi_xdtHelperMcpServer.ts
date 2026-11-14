@@ -112,6 +112,7 @@ import {
 } from './xdt-helper/teammate_projects.js';
 import { registerRemoteControlRequestTool, registerListMachinesTool, type ListMachinesCallbacks } from './xdt-helper/list_machines.js';
 import { registerTeammateHomeTools, type TeammateHomeCallbacks } from './xdt-helper/teammate_home.js';
+import { registerTeammateGroupTools, type TeammateGroupsCallbacks } from './xdt-helper/teammate_groups.js';
 import {
   registerBotCapabilityTools,
   registerAppDefaultModelTools,
@@ -233,8 +234,8 @@ export const HELPER_CATEGORY_DESCRIPTIONS: Record<(typeof CATEGORY_ENUM)[number]
     `本机。`,
   ].join(''),
   bots: [
-    '伙伴：资料、能力、关联项目（list_teammate_projects / set_teammate_project，仅自身）、发现伙伴与主力电脑。',
-    '发现伙伴（list_agents，返回伙伴主对话的 session_id，发消息用 handoff 类的 send_to_session）与主力电脑（get_teammate_home / move_teammate_home）可跨电脑；',
+    '伙伴：资料、能力、关联项目（list_teammate_projects / set_teammate_project，仅自身）、发现伙伴、分组层级树与主力电脑。',
+    '发现伙伴（list_agents，返回伙伴主对话的 session_id，发消息用 handoff 类的 send_to_session）、主力电脑（get_teammate_home / move_teammate_home）与伙伴分组树（get_teammate_groups / organize_teammate_groups）可跨电脑；',
     '其余本机。',
   ].join(''),
 };
@@ -539,6 +540,8 @@ export interface XdtHelperMcpDeps {
   botCapabilities?: BotCapabilityCallbacks;
   /** Which computer runs a teammate, and moving it to another (cloud companions). */
   teammateHome?: TeammateHomeCallbacks;
+  /** Reading and batch/smart organizing the teammate hierarchy folder tree. */
+  teammateGroups?: TeammateGroupsCallbacks;
   /** What machines this account has and their live resources. */
   machines?: ListMachinesCallbacks;
   /**
@@ -797,6 +800,12 @@ export function createXdtHelperMcpServer(
     registerTeammateHomeTools(registry, {
       getSessionContext: () => resolveLiziMcpSessionContext(sessionCtx),
       callbacks: deps.teammateHome,
+    });
+  }
+  if (deps.teammateGroups) {
+    registerTeammateGroupTools(registry, {
+      getSessionContext: () => resolveLiziMcpSessionContext(sessionCtx),
+      callbacks: deps.teammateGroups,
     });
   }
   if (deps.modelSettings) registerAppModelsTools(registry, deps.modelSettings, () => resolveLiziMcpSessionContext(sessionCtx));

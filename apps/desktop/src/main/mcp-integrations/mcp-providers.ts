@@ -35,17 +35,31 @@ import type { createBotCapabilityService } from '../maker-ipc/botCapabilityServi
 import { join as pathJoin } from 'node:path';
 import { homedir } from 'node:os';
 import { app } from 'electron';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 
 import {
   createLiziMcpProviders,
   resolveLiziMcpSessionContext,
   setSessionPathAuthorizer,
+  type GetTeammateGroupsRequestWire,
+  type GetTeammateGroupsResultWire,
   type LiziMcpProvider,
   type LiziMcpSessionContext,
   type LspServerPool,
-  type XdtHelperMcpDeps,
+  type OrganizeTeammateGroupsRequestWire,
+  type OrganizeTeammateGroupsResultWire,
+  type OrganizeTeammateOperationWire,
+  type OrganizeTeammateRuleWire,
   type SshHostSnapshotLike,
+  type TeammateAssignmentChangeWire,
+  type TeammateFolderChangeWire,
+  type TeammateGroupErrorCode,
+  type TeammateGroupFolderWire,
+  type TeammateGroupKindWire,
+  type TeammateGroupMemberWire,
+  type TeammateGroupTreeNodeWire,
+  type TeammateGroupsCallbacks,
+  type XdtHelperMcpDeps,
 } from '@cindy/mcps';
 import type { OrcaMcpDeps } from '@cindy/mcps';
 import type { Schedule } from '@cindy/maker-scheduler';
@@ -136,7 +150,7 @@ import {
   readChatHistoryMessages,
   type ChatHistoryReaderDeps,
 } from './remoteChatHistory.js';
-import { botSessionLinks, sessions } from '../localDb/schema.js';
+import { botGroups, botProfiles, botSessionLinks, sessions } from '../localDb/schema.js';
 import { createSchedulerRemoteDeps } from './schedulerDevices.js';
 import { createRemoteSessionHandoff } from './sessionHandoffRemote.js';
 import { createRemoteSessionsStatusSetter } from './sessionStatusRemote.js';
@@ -148,6 +162,33 @@ import { consumeLearnInvocationGrant } from '../learn-host/invocationGrant.js';
 import { createSkillhubAgentTools } from '../skillhub/agentTools.js';
 import { startGrokDeviceLogin, grokDeviceLoginStatus, cancelGrokDeviceLogin } from '../maker-host/grok-device-login-service.js';
 import { resolveSessionTeammate } from '../maker-ipc/sessionTeammate.js';
+import { REMOTE_RESOURCE_LIST_CHANNEL, type RemoteCollectionListResponse, type RemoteText } from '@cindy/device-link';
+import { companionHomes, inactiveCompanionCopyIds, isCompanionShadowed } from '../companion-cloud/homes.js';
+import { mutateMainBotHierarchyConfig, readBotHierarchyConfig } from '../maker-ipc/botHierarchyStore.js';
+import {
+  BOT_HIERARCHY_MAX_DEPTH,
+  BOT_HIERARCHY_MAX_FOLDERS,
+  applyBotBatchOrganize,
+  assignItemsToFolder,
+  botHierarchyItemKey,
+  buildBotFolderTree,
+  buildSmartBotHierarchy,
+  createBotFolder,
+  deleteBotFolder,
+  flattenFolderOptions,
+  getFolderBreadcrumb,
+  groupHierarchyItemKey,
+  isFolderDescendantOrSelf,
+  moveBotFolder,
+  normalizeBotHierarchyConfig,
+  renameBotFolder,
+  resolveBotFolderId,
+  resolveItemFolderId,
+  type BotBatchOrganizeRule,
+  type BotHierarchyConfigV1,
+  type BotHierarchyFolderTreeNode,
+  type BotRosterOrganizeEntry,
+} from '../../shared/botHierarchy.js';
 
 export interface DesktopMcpProvidersDeps {
   askUserQuestionAsync?: XdtHelperMcpDeps['askUserQuestionAsync'];
@@ -218,6 +259,1198 @@ const feishuTransportFor = createFeishuTransportResolver({
   getCompanionTransport: getBotFeishuTransport,
   personalIm: feishuIm,
 });
+
+class TeammateGroupMutationError extends Error {
+  constructor(
+    readonly code: TeammateGroupErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function splitHierarchyPathSegments(raw: string): string[] {
+  return raw
+    .split(/[\\/]+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+}
+
+function readRemoteDisplayText(value: RemoteText | undefined): string {
+  if (!value) return '';
+  return typeof value === 'string' ? value : value.fallback;
+}
+
+function extractTeammateRoleCode(name: string, title?: string): string | undefined {
+  for (const text of [name, title]) {
+    if (!text) continue;
+    const bracketed = text.match(/[（([【]((?:SECRETARY|HB|AU|BD|PM|MR|DA|OP|FN|LG|HR|M|D|P|A|Q|H)(?:\d+(?:_[A-Za-z0-9_]+)?)?)[）)\]】]/i);
+    if (bracketed?.[1]) return bracketed[1].toUpperCase();
+    const token = text.match(/\b(SECRETARY|(?:HB|AU|BD|PM|MR|DA|OP|FN|LG|M|D|P|A|Q|H)\d+(?:_[A-Za-z0-9_]+)?)\b/i);
+    if (token?.[1]) return token[1].toUpperCase();
+  }
+  return undefined;
+}
+
+function resolveMemberFolderId(
+  config: BotHierarchyConfigV1,
+  member: Pick<TeammateGroupMemberWire, 'botId' | 'itemKey' | 'kind' | 'deviceId'>,
+): string | null {
+  if (member.kind === 'group') {
+    return resolveItemFolderId(config, member.itemKey);
+  }
+  return resolveBotFolderId(
+    config,
+    member.botId,
+    member.kind === 'remote' ? member.deviceId : undefined,
+  );
+}
+
+function resolveHierarchyFolderId(
+  config: BotHierarchyConfigV1,
+  folderId?: string,
+  pathStr?: string,
+): string | null {
+  if (folderId) {
+    return config.folders[folderId] ? folderId : null;
+  }
+  if (!pathStr) return null;
+  const targetSegments = splitHierarchyPathSegments(pathStr).map((s) => s.toLowerCase());
+  if (targetSegments.length === 0) return null;
+  const options = flattenFolderOptions(config);
+  const match = options.find(
+    (opt) =>
+      opt.path.length === targetSegments.length &&
+      opt.path.every((seg, idx) => seg.trim().toLowerCase() === targetSegments[idx]),
+  );
+  return match?.id ?? null;
+}
+
+function collectDescendantFolderIds(config: BotHierarchyConfigV1, rootId: string): Set<string> {
+  const result = new Set<string>();
+  for (const folderId of Object.keys(config.folders)) {
+    if (isFolderDescendantOrSelf(config, folderId, rootId)) {
+      result.add(folderId);
+    }
+  }
+  return result;
+}
+
+function toRosterEntry(member: TeammateGroupMemberWire): BotRosterOrganizeEntry {
+  return {
+    itemKey: member.itemKey,
+    kind: member.kind === 'group' ? 'group' : 'bot',
+    ...(member.kind === 'group' ? { groupId: member.botId } : { botId: member.botId }),
+    deviceId: member.deviceId ?? null,
+    deviceName: member.deviceName ?? null,
+    name: member.name,
+    title: member.title ?? null,
+    role: member.roleCode ?? null,
+    description: member.title ?? null,
+    isRemote: member.kind === 'remote' || member.kind === 'cloud',
+  };
+}
+
+function matchesMemberDevice(
+  member: TeammateGroupMemberWire,
+  filterDeviceId: string,
+  selfDeviceId: string | undefined,
+): boolean {
+  if (filterDeviceId === 'local') {
+    return member.kind === 'local' || (Boolean(selfDeviceId) && member.deviceId === selfDeviceId);
+  }
+  return member.deviceId === filterDeviceId;
+}
+
+function matchesOrganizeRule(
+  member: TeammateGroupMemberWire,
+  rule: OrganizeTeammateRuleWire,
+  selfDeviceId: string | undefined,
+): boolean {
+  if (rule.kind !== undefined && member.kind !== rule.kind) return false;
+  if (rule.deviceId !== undefined && !matchesMemberDevice(member, rule.deviceId, selfDeviceId)) {
+    return false;
+  }
+  if (rule.botIds && rule.botIds.length > 0) {
+    const idSet = new Set(rule.botIds.map((id) => id.trim()));
+    if (!idSet.has(member.botId) && !idSet.has(member.itemKey)) return false;
+  }
+  if (rule.prefix !== undefined) {
+    const prefixLower = rule.prefix.trim().toLowerCase();
+    const nameMatch = member.name.trim().toLowerCase().startsWith(prefixLower);
+    const titleMatch = Boolean(member.title?.trim().toLowerCase().startsWith(prefixLower));
+    if (!nameMatch && !titleMatch) return false;
+  }
+  const haystack = [member.name, member.title, member.botId, member.roleCode]
+    .filter((v): v is string => Boolean(v && v.trim()))
+    .join('\n');
+  if (rule.keyword !== undefined) {
+    if (!haystack.toLowerCase().includes(rule.keyword.trim().toLowerCase())) return false;
+  }
+  if (rule.role !== undefined) {
+    const clean = rule.role.trim().toUpperCase().replace(/\*+$/, '');
+    const roleMatch = (() => {
+      if (!clean) return false;
+      if (member.roleCode) {
+        const upper = member.roleCode.toUpperCase();
+        if (upper === clean) return true;
+        if (clean.length === 1) {
+          if (new RegExp(`^${clean}(?:\\d|_|$)`).test(upper)) return true;
+        } else if (upper.startsWith(clean)) {
+          return true;
+        }
+      }
+      return haystack.toLowerCase().includes(rule.role!.trim().toLowerCase());
+    })();
+    if (!roleMatch) return false;
+  }
+  if (rule.regex !== undefined) {
+    if (!new RegExp(rule.regex, 'i').test(haystack)) return false;
+  }
+  return true;
+}
+
+function resolveExplicitRuleItemKeys(
+  rule: OrganizeTeammateRuleWire,
+  members: TeammateGroupMemberWire[],
+  selfDeviceId: string | undefined,
+): string[] {
+  const matched = members.filter((m) => matchesOrganizeRule(m, rule, selfDeviceId));
+  const keys = matched.map((m) => m.itemKey);
+  // Allow explicit botIds targeting offline/not-yet-projected bots when no live-metadata filter restricts them.
+  const hasMetadataFilter = Boolean(
+    rule.prefix !== undefined ||
+      rule.regex !== undefined ||
+      rule.keyword !== undefined ||
+      rule.role !== undefined ||
+      rule.kind !== undefined ||
+      rule.deviceId !== undefined,
+  );
+  if (!hasMetadataFilter && rule.botIds && rule.botIds.length > 0) {
+    const seen = new Set(keys);
+    const knownById = new Map<string, string>();
+    for (const m of members) {
+      knownById.set(m.itemKey, m.itemKey);
+      if (!knownById.has(m.botId)) knownById.set(m.botId, m.itemKey);
+    }
+    for (const rawId of rule.botIds) {
+      const id = rawId.trim();
+      if (!id) continue;
+      const resolved = knownById.get(id) ?? (id.includes(':') ? id : botHierarchyItemKey(id));
+      if (resolved && !seen.has(resolved)) {
+        seen.add(resolved);
+        keys.push(resolved);
+      }
+    }
+  }
+  return keys;
+}
+
+async function collectTeammateHierarchyRoster(
+  deps: DesktopMcpProvidersDeps,
+): Promise<
+  | { ok: true; selfDeviceId?: string; members: TeammateGroupMemberWire[] }
+  | { ok: false; errorCode: TeammateGroupErrorCode; message: string }
+> {
+  const dbClient = tryGetDbClient();
+  if (!dbClient) {
+    return { ok: false, errorCode: 'HOST_NOT_READY', message: 'localDb not ready' };
+  }
+  const selfDeviceId = getDeviceId() || undefined;
+  const cloudView = companionHomes.snapshot();
+  const inactiveIds = new Set(inactiveCompanionCopyIds(cloudView));
+  const cloudActorsByExternalId = new Map(
+    cloudView.actors.map((actor) => [actor.externalId, actor]),
+  );
+
+  const memberByKey = new Map<string, TeammateGroupMemberWire>();
+  const localBotIds = new Set<string>();
+
+  const localProfiles = await dbClient.drizzle
+    .select({
+      id: botProfiles.id,
+      displayName: botProfiles.displayName,
+      description: botProfiles.description,
+      status: botProfiles.status,
+    })
+    .from(botProfiles)
+    .where(ne(botProfiles.status, 'archived'))
+    .orderBy(desc(botProfiles.updatedAt));
+
+  for (const row of localProfiles) {
+    if (inactiveIds.has(row.id) || isCompanionShadowed(row.id)) continue;
+    const itemKey = botHierarchyItemKey(row.id);
+    if (!itemKey) continue;
+    localBotIds.add(row.id);
+    const title = row.description.trim() || undefined;
+    memberByKey.set(itemKey, {
+      botId: row.id,
+      itemKey,
+      name: row.displayName,
+      ...(title ? { title } : {}),
+      ...(selfDeviceId ? { deviceId: selfDeviceId } : {}),
+      kind: 'local',
+      ...(extractTeammateRoleCode(row.displayName, title)
+        ? { roleCode: extractTeammateRoleCode(row.displayName, title) }
+        : {}),
+      folderId: null,
+      breadcrumb: '',
+      breadcrumbParts: [],
+    });
+  }
+
+  const localGroups = await dbClient.drizzle
+    .select({ id: botGroups.id, name: botGroups.name })
+    .from(botGroups)
+    .orderBy(desc(botGroups.updatedAt));
+
+  for (const group of localGroups) {
+    const itemKey = groupHierarchyItemKey(group.id);
+    if (!itemKey) continue;
+    memberByKey.set(itemKey, {
+      botId: group.id,
+      itemKey,
+      name: group.name,
+      ...(selfDeviceId ? { deviceId: selfDeviceId } : {}),
+      kind: 'group',
+      folderId: null,
+      breadcrumb: '',
+      breadcrumbParts: [],
+    });
+  }
+
+  const deviceNameById = new Map<string, string>();
+  type PeerDevice = { deviceId: string; name: string };
+  const onlinePeerDevices: PeerDevice[] = [];
+
+  try {
+    if (deps.machineDirectory?.listDevices) {
+      const devices = await deps.machineDirectory.listDevices();
+      for (const dev of devices) {
+        deviceNameById.set(dev.deviceId, dev.name);
+        if (
+          !dev.isSelf &&
+          !['ios', 'android'].includes(dev.platform ?? '') &&
+          dev.online &&
+          dev.controlEnabled &&
+          dev.remoteControlEnabled
+        ) {
+          onlinePeerDevices.push({ deviceId: dev.deviceId, name: dev.name });
+        }
+      }
+    } else if (deps.historyRemote?.listDevices) {
+      const devices = await deps.historyRemote.listDevices();
+      for (const dev of devices) {
+        deviceNameById.set(dev.deviceId, dev.deviceName);
+        if (!dev.local && dev.available) {
+          onlinePeerDevices.push({ deviceId: dev.deviceId, name: dev.deviceName });
+        }
+      }
+    }
+  } catch {
+    // Peer device enumeration failure must never break local/cloud hierarchy reading or organizing.
+  }
+
+  if (cloudView.enabled) {
+    for (const actor of cloudView.actors) {
+      if (!actor.homeDeviceId || actor.homeDeviceId === selfDeviceId || localBotIds.has(actor.externalId)) {
+        continue;
+      }
+      const itemKey = botHierarchyItemKey(actor.externalId);
+      if (!itemKey || memberByKey.has(itemKey)) continue;
+      const deviceName = deviceNameById.get(actor.homeDeviceId);
+      const roleCode = extractTeammateRoleCode(actor.name);
+      memberByKey.set(itemKey, {
+        botId: actor.externalId,
+        itemKey,
+        name: actor.name,
+        deviceId: actor.homeDeviceId,
+        ...(deviceName ? { deviceName } : {}),
+        kind: 'cloud',
+        ...(roleCode ? { roleCode } : {}),
+        folderId: null,
+        breadcrumb: '',
+        breadcrumbParts: [],
+      });
+    }
+  }
+
+  const clientDescriptor = { protocolVersion: 1, primitives: ['status', 'session-link'] };
+  for (let offset = 0; offset < onlinePeerDevices.length; offset += 3) {
+    await Promise.all(
+      onlinePeerDevices.slice(offset, offset + 3).map(async (peer) => {
+        try {
+          const response = await deps.invokeRemote(
+            peer.deviceId,
+            REMOTE_RESOURCE_LIST_CHANNEL,
+            [{ client: clientDescriptor, collectionId: 'teammates', limit: 200 }],
+          );
+          if (!response.ok || !response.result || typeof response.result !== 'object') return;
+          const items = (response.result as RemoteCollectionListResponse).items;
+          if (!Array.isArray(items)) return;
+          for (const item of items) {
+            if (item.ref.collectionId !== 'teammates' || item.ref.kind !== 'bot') continue;
+            const botId = item.ref.id;
+            const name = readRemoteDisplayText(item.display.title) || botId;
+            const title = readRemoteDisplayText(item.display.subtitle) || undefined;
+            const cloudActor = cloudActorsByExternalId.get(botId);
+            if (cloudActor && (cloudActor.homeDeviceId === peer.deviceId || cloudView.enabled)) {
+              const cloudKey = botHierarchyItemKey(botId);
+              if (!cloudKey) continue;
+              const existing = memberByKey.get(cloudKey);
+              if (existing && existing.kind === 'local') continue;
+              const roleCode = extractTeammateRoleCode(name, title);
+              memberByKey.set(cloudKey, {
+                botId,
+                itemKey: cloudKey,
+                name,
+                ...(title ? { title } : {}),
+                deviceId: peer.deviceId,
+                deviceName: peer.name,
+                kind: 'cloud',
+                ...(roleCode ? { roleCode } : {}),
+                folderId: null,
+                breadcrumb: '',
+                breadcrumbParts: [],
+              });
+              continue;
+            }
+            const remoteKey = botHierarchyItemKey(botId, peer.deviceId);
+            if (!remoteKey) continue;
+            const roleCode = extractTeammateRoleCode(name, title);
+            memberByKey.set(remoteKey, {
+              botId,
+              itemKey: remoteKey,
+              name,
+              ...(title ? { title } : {}),
+              deviceId: peer.deviceId,
+              deviceName: peer.name,
+              kind: 'remote',
+              ...(roleCode ? { roleCode } : {}),
+              folderId: null,
+              breadcrumb: '',
+              breadcrumbParts: [],
+            });
+          }
+        } catch {
+          // Ignore single peer timeout/rejection so reachable devices and local roster remain usable.
+        }
+      }),
+    );
+  }
+
+  return { ok: true, selfDeviceId, members: [...memberByKey.values()] };
+}
+
+function hydrateMembersWithConfig(
+  config: BotHierarchyConfigV1,
+  rawMembers: TeammateGroupMemberWire[],
+): TeammateGroupMemberWire[] {
+  const folderOptions = flattenFolderOptions(config);
+  const pathByFolderId = new Map(folderOptions.map((opt) => [opt.id, opt.path]));
+
+  return rawMembers
+    .map((member) => {
+      const folderId = resolveMemberFolderId(config, member);
+      const breadcrumbParts = folderId ? pathByFolderId.get(folderId) ?? [] : [];
+      const order = config.assignments[member.itemKey]?.order;
+      return {
+        ...member,
+        folderId,
+        breadcrumbParts,
+        breadcrumb: breadcrumbParts.join('/'),
+        ...(order !== undefined ? { order } : {}),
+      };
+    })
+    .sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name));
+}
+
+function buildHierarchyTreeNodes(
+  nodes: BotHierarchyFolderTreeNode[],
+  membersByFolder: Map<string, TeammateGroupMemberWire[]>,
+  opts?: {
+    allowedFolderIds?: Set<string>;
+    queryLower?: string;
+    includeEmptyFolders: boolean;
+  },
+): TeammateGroupTreeNodeWire[] {
+  const out: TeammateGroupTreeNodeWire[] = [];
+
+  for (const node of nodes) {
+    const children = buildHierarchyTreeNodes(node.children, membersByFolder, opts);
+    const directMembers = membersByFolder.get(node.folder.id) ?? [];
+    const directMemberCount = directMembers.length;
+    const totalMemberCount =
+      directMemberCount + children.reduce((acc, child) => acc + child.totalMemberCount, 0);
+    const pathStr = node.path.join('/');
+
+    if (opts?.allowedFolderIds && !opts.allowedFolderIds.has(node.folder.id)) {
+      out.push(...children);
+      continue;
+    }
+
+    if (opts?.queryLower) {
+      const folderMatches =
+        node.folder.name.toLowerCase().includes(opts.queryLower) ||
+        pathStr.toLowerCase().includes(opts.queryLower);
+      if (!folderMatches && totalMemberCount === 0) continue;
+    }
+
+    if (!opts?.includeEmptyFolders && totalMemberCount === 0) {
+      continue;
+    }
+
+    out.push({
+      id: node.folder.id,
+      name: node.folder.name,
+      parentId: node.folder.parentId,
+      order: node.folder.order,
+      path: pathStr,
+      pathParts: node.path,
+      depth: node.depth,
+      directMemberCount,
+      totalMemberCount,
+      members: directMembers,
+      children,
+    });
+  }
+
+  return out;
+}
+
+function flattenTreeNodeSummaries(nodes: TeammateGroupTreeNodeWire[]): TeammateGroupFolderWire[] {
+  const flat: TeammateGroupFolderWire[] = [];
+  const walk = (list: TeammateGroupTreeNodeWire[]): void => {
+    for (const node of list) {
+      const { members: _members, children, ...folder } = node;
+      flat.push(folder);
+      walk(children);
+    }
+  };
+  walk(nodes);
+  return flat;
+}
+
+function buildTeammateGroupsView(
+  rawConfig: BotHierarchyConfigV1,
+  rawMembers: TeammateGroupMemberWire[],
+  selfDeviceId: string | undefined,
+  filter?: Omit<GetTeammateGroupsRequestWire, 'callerSessionId'>,
+):
+  | { ok: true; data: GetTeammateGroupsResultWire }
+  | { ok: false; errorCode: TeammateGroupErrorCode; message: string } {
+  const config = normalizeBotHierarchyConfig(rawConfig);
+  const allMembers = hydrateMembersWithConfig(config, rawMembers);
+
+  let allowedFolderIds: Set<string> | undefined;
+  if (filter?.folderId || filter?.path) {
+    const byId = filter.folderId ? resolveHierarchyFolderId(config, filter.folderId, undefined) : null;
+    const byPath = filter.path ? resolveHierarchyFolderId(config, undefined, filter.path) : null;
+    if (filter.folderId && !byId) {
+      return { ok: false, errorCode: 'NOT_FOUND', message: `Folder "${filter.folderId}" not found.` };
+    }
+    if (filter.path && !byPath) {
+      return { ok: false, errorCode: 'NOT_FOUND', message: `Folder path "${filter.path}" not found.` };
+    }
+    if (byId && byPath && byId !== byPath) {
+      return { ok: false, errorCode: 'INVALID_ARGS', message: 'folder_id and path refer to different folders.' };
+    }
+    const targetFolderId = (byId ?? byPath)!;
+    allowedFolderIds = filter.includeDescendants !== false
+      ? collectDescendantFolderIds(config, targetFolderId)
+      : new Set([targetFolderId]);
+  }
+
+  const queryLower = filter?.query?.trim().toLowerCase() || undefined;
+  const matchedTeammates = allMembers.filter((member) => {
+    if (allowedFolderIds && (!member.folderId || !allowedFolderIds.has(member.folderId))) {
+      return false;
+    }
+    if (filter?.deviceId && !matchesMemberDevice(member, filter.deviceId, selfDeviceId)) {
+      return false;
+    }
+    if (filter?.kind && member.kind !== filter.kind) {
+      return false;
+    }
+    if (filter?.ungroupedOnly && member.folderId !== null) {
+      return false;
+    }
+    if (queryLower) {
+      const matches = [
+        member.botId,
+        member.name,
+        member.title,
+        member.roleCode,
+        member.breadcrumb,
+      ].some((field) => field?.toLowerCase().includes(queryLower));
+      if (!matches) return false;
+    }
+    return true;
+  });
+
+  const membersByFolder = new Map<string, TeammateGroupMemberWire[]>();
+  for (const member of matchedTeammates) {
+    if (!member.folderId) continue;
+    const list = membersByFolder.get(member.folderId);
+    if (list) list.push(member);
+    else membersByFolder.set(member.folderId, [member]);
+  }
+
+  const includeEmpty = filter?.includeEmptyFolders !== false;
+  const tree = buildHierarchyTreeNodes(buildBotFolderTree(config), membersByFolder, {
+    allowedFolderIds,
+    queryLower,
+    includeEmptyFolders: filter?.ungroupedOnly ? false : includeEmpty,
+  });
+  const folders = flattenTreeNodeSummaries(tree);
+  const ungrouped = matchedTeammates.filter((member) => member.folderId === null);
+  const groupedCount = allMembers.filter((member) => member.folderId !== null).length;
+
+  return {
+    ok: true,
+    data: {
+      version: config.version,
+      updatedAt: new Date(config.updatedAt || Date.now()).toISOString(),
+      ...(config.updatedByDeviceId ? { updatedByDeviceId: config.updatedByDeviceId } : {}),
+      maxDepth: BOT_HIERARCHY_MAX_DEPTH,
+      maxFolders: BOT_HIERARCHY_MAX_FOLDERS,
+      stats: {
+        totalFolders: Object.keys(config.folders).length,
+        totalTeammates: allMembers.length,
+        groupedCount,
+        ungroupedCount: allMembers.length - groupedCount,
+        matchedTeammates: matchedTeammates.length,
+        matchedFolders: folders.length,
+      },
+      tree,
+      folders,
+      teammates: matchedTeammates,
+      ungrouped,
+    },
+  };
+}
+
+function mapHierarchyMutationError(error: unknown): TeammateGroupMutationError {
+  if (error instanceof TeammateGroupMutationError) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  if (/not found/i.test(message)) {
+    return new TeammateGroupMutationError('NOT_FOUND', message);
+  }
+  if (/maximum|limit/i.test(message)) {
+    return new TeammateGroupMutationError('LIMIT_EXCEEDED', message);
+  }
+  if (/cycle|descendant|empty|must not/i.test(message)) {
+    return new TeammateGroupMutationError('INVALID_ARGS', message);
+  }
+  return new TeammateGroupMutationError('OPERATION_FAILED', message);
+}
+
+function applySingleOperation(
+  config: BotHierarchyConfigV1,
+  op: OrganizeTeammateOperationWire,
+  members: TeammateGroupMemberWire[],
+  rosterEntries: BotRosterOrganizeEntry[],
+  stepTs: number,
+  deviceId: string | undefined,
+  warnings: string[],
+  reasonByKey: Map<string, string>,
+): BotHierarchyConfigV1 {
+  switch (op.op) {
+    case 'create_folder': {
+      if (op.path) {
+        const segments = splitHierarchyPathSegments(op.path);
+        if (segments.length === 0) {
+          throw new TeammateGroupMutationError('INVALID_ARGS', 'Folder path must not be empty.');
+        }
+        if (segments.length > BOT_HIERARCHY_MAX_DEPTH) {
+          throw new TeammateGroupMutationError(
+            'LIMIT_EXCEEDED',
+            `Folder path exceeds maximum depth of ${BOT_HIERARCHY_MAX_DEPTH}.`,
+          );
+        }
+        const res = applyBotBatchOrganize(
+          config,
+          rosterEntries,
+          [{ type: 'create-folder', folderPath: segments }],
+          { now: stepTs, deviceId },
+        );
+        if (res.summary.skippedForLimits > 0) {
+          throw new TeammateGroupMutationError(
+            'LIMIT_EXCEEDED',
+            `Maximum folder count (${BOT_HIERARCHY_MAX_FOLDERS}) reached.`,
+          );
+        }
+        return res.config;
+      }
+
+      let current = config;
+      let parentId: string | null = op.parentId ?? null;
+      if (op.parentPath) {
+        const parentSegments = splitHierarchyPathSegments(op.parentPath);
+        if (parentSegments.length === 0) {
+          throw new TeammateGroupMutationError('INVALID_ARGS', 'parent_path must not be empty.');
+        }
+        if (parentSegments.length + 1 > BOT_HIERARCHY_MAX_DEPTH) {
+          throw new TeammateGroupMutationError(
+            'LIMIT_EXCEEDED',
+            `Folder depth exceeds maximum of ${BOT_HIERARCHY_MAX_DEPTH}.`,
+          );
+        }
+        const parentRes = applyBotBatchOrganize(
+          current,
+          rosterEntries,
+          [{ type: 'create-folder', folderPath: parentSegments }],
+          { now: stepTs, deviceId },
+        );
+        if (parentRes.summary.skippedForLimits > 0) {
+          throw new TeammateGroupMutationError(
+            'LIMIT_EXCEEDED',
+            `Maximum folder count (${BOT_HIERARCHY_MAX_FOLDERS}) reached.`,
+          );
+        }
+        current = parentRes.config;
+        parentId = resolveHierarchyFolderId(current, undefined, op.parentPath);
+      } else if (parentId !== null && !current.folders[parentId]) {
+        throw new TeammateGroupMutationError('NOT_FOUND', `Parent folder "${parentId}" not found.`);
+      }
+
+      const nameTrimmed = op.name?.trim() ?? '';
+      const duplicate = Object.values(current.folders).find(
+        (f) => (f.parentId ?? null) === parentId && f.name.toLowerCase() === nameTrimmed.toLowerCase(),
+      );
+      if (duplicate) return current;
+
+      try {
+        return createBotFolder(current, {
+          name: nameTrimmed,
+          parentId,
+          now: stepTs,
+          deviceId,
+        }).config;
+      } catch (error) {
+        throw mapHierarchyMutationError(error);
+      }
+    }
+
+    case 'rename_folder': {
+      const targetId = resolveHierarchyFolderId(config, op.folderId, op.path);
+      if (!targetId) {
+        throw new TeammateGroupMutationError(
+          'NOT_FOUND',
+          `Folder "${op.folderId ?? op.path ?? ''}" not found.`,
+        );
+      }
+      try {
+        return renameBotFolder(config, targetId, op.newName, { now: stepTs, deviceId });
+      } catch (error) {
+        throw mapHierarchyMutationError(error);
+      }
+    }
+
+    case 'move_folder': {
+      const targetId = resolveHierarchyFolderId(config, op.folderId, op.path);
+      if (!targetId) {
+        throw new TeammateGroupMutationError(
+          'NOT_FOUND',
+          `Folder "${op.folderId ?? op.path ?? ''}" not found.`,
+        );
+      }
+      let nextParentId: string | null = null;
+      if (!op.toRoot && op.targetParentId !== null) {
+        if (op.targetParentId) {
+          if (!config.folders[op.targetParentId]) {
+            throw new TeammateGroupMutationError(
+              'NOT_FOUND',
+              `Target parent folder "${op.targetParentId}" not found.`,
+            );
+          }
+          nextParentId = op.targetParentId;
+        } else if (op.targetParentPath) {
+          const resolvedParent = resolveHierarchyFolderId(config, undefined, op.targetParentPath);
+          if (!resolvedParent) {
+            throw new TeammateGroupMutationError(
+              'NOT_FOUND',
+              `Target parent path "${op.targetParentPath}" not found.`,
+            );
+          }
+          nextParentId = resolvedParent;
+        }
+      }
+      try {
+        return moveBotFolder(config, targetId, nextParentId, { now: stepTs, deviceId });
+      } catch (error) {
+        throw mapHierarchyMutationError(error);
+      }
+    }
+
+    case 'delete_folder': {
+      const targetId = resolveHierarchyFolderId(config, op.folderId, op.path);
+      if (!targetId) {
+        throw new TeammateGroupMutationError(
+          'NOT_FOUND',
+          `Folder "${op.folderId ?? op.path ?? ''}" not found.`,
+        );
+      }
+      if (op.reparentToParent === false) {
+        const subtreeIds = collectDescendantFolderIds(config, targetId);
+        const affectedKeys = Object.entries(config.assignments)
+          .filter(([, assignment]) => assignment.folderId !== null && subtreeIds.has(assignment.folderId))
+          .map(([key]) => key);
+        let next = deleteBotFolder(config, targetId, {
+          mode: 'cascade',
+          now: stepTs,
+          deviceId,
+        });
+        if (affectedKeys.length > 0 && config.folders[targetId]?.parentId !== null) {
+          next = assignItemsToFolder(next, affectedKeys, null, { now: stepTs + 1, deviceId });
+        }
+        for (const key of affectedKeys) reasonByKey.set(key, 'operation:delete_folder');
+        return next;
+      }
+      return deleteBotFolder(config, targetId, {
+        mode: 'promote-children',
+        now: stepTs,
+        deviceId,
+      });
+    }
+
+    case 'assign': {
+      const targetKeys = resolveExplicitRuleItemKeys(
+        { botIds: op.botIds },
+        members,
+        deviceId,
+      );
+      if (op.unassign) {
+        for (const k of targetKeys) reasonByKey.set(k, 'operation:unassign');
+        return assignItemsToFolder(config, targetKeys, null, { now: stepTs, deviceId });
+      }
+      if (op.folderId) {
+        if (!config.folders[op.folderId]) {
+          throw new TeammateGroupMutationError('NOT_FOUND', `Folder "${op.folderId}" not found.`);
+        }
+        for (const k of targetKeys) reasonByKey.set(k, `operation:assign:${op.folderId}`);
+        return assignItemsToFolder(config, targetKeys, op.folderId, { now: stepTs, deviceId });
+      }
+      const segments = splitHierarchyPathSegments(op.targetPath ?? '');
+      if (segments.length === 0) {
+        throw new TeammateGroupMutationError('INVALID_ARGS', 'target_path must not be empty.');
+      }
+      if (segments.length > BOT_HIERARCHY_MAX_DEPTH) {
+        throw new TeammateGroupMutationError(
+          'LIMIT_EXCEEDED',
+          `Target folder depth exceeds maximum of ${BOT_HIERARCHY_MAX_DEPTH}.`,
+        );
+      }
+      const res = applyBotBatchOrganize(
+        config,
+        rosterEntries,
+        [{ type: 'assign', folderPath: segments, itemKeys: targetKeys }],
+        { now: stepTs, deviceId, overwriteExistingAssignments: true },
+      );
+      if (res.summary.skippedForLimits > 0) {
+        warnings.push(`Folder limit (${BOT_HIERARCHY_MAX_FOLDERS}) prevented creating "${segments.join('/')}".`);
+      }
+      for (const k of targetKeys) reasonByKey.set(k, `operation:assign:${segments.join('/')}`);
+      return res.config;
+    }
+
+    case 'unassign': {
+      const targetKeys = resolveExplicitRuleItemKeys(
+        { botIds: op.botIds },
+        members,
+        deviceId,
+      );
+      for (const k of targetKeys) reasonByKey.set(k, 'operation:unassign');
+      return assignItemsToFolder(config, targetKeys, null, { now: stepTs, deviceId });
+    }
+  }
+}
+
+function computeOrganizedHierarchy(
+  rawBeforeConfig: BotHierarchyConfigV1,
+  members: TeammateGroupMemberWire[],
+  request: OrganizeTeammateGroupsRequestWire,
+  selfDeviceId: string | undefined,
+): {
+  nextConfig: BotHierarchyConfigV1;
+  result: OrganizeTeammateGroupsResultWire;
+} {
+  const beforeConfig = normalizeBotHierarchyConfig(rawBeforeConfig);
+  const baseTs = Math.max(Date.now(), beforeConfig.updatedAt + 1);
+  let working = normalizeBotHierarchyConfig(beforeConfig);
+  let stepCounter = 0;
+
+  const rosterEntries = members.map(toRosterEntry);
+  const warnings: string[] = [];
+  const reasonByKey = new Map<string, string>();
+  let unmatchedRules = 0;
+
+  if (request.operations?.length) {
+    for (const op of request.operations) {
+      working = applySingleOperation(
+        working,
+        op,
+        members,
+        rosterEntries,
+        baseTs + stepCounter * 2,
+        selfDeviceId,
+        warnings,
+        reasonByKey,
+      );
+      stepCounter += 1;
+    }
+  }
+
+  if (request.smart) {
+    const scopedIdSet = request.botIds?.length ? new Set(request.botIds.map((id) => id.trim())) : null;
+    const isScoped = Boolean(scopedIdSet || request.deviceId || request.kind || request.ungroupedOnly);
+    const scopedMembers = members.filter((member) => {
+      if (scopedIdSet && !scopedIdSet.has(member.botId) && !scopedIdSet.has(member.itemKey)) {
+        return false;
+      }
+      if (request.deviceId && !matchesMemberDevice(member, request.deviceId, selfDeviceId)) {
+        return false;
+      }
+      if (request.kind && member.kind !== request.kind) {
+        return false;
+      }
+      if (request.ungroupedOnly && resolveMemberFolderId(working, member) !== null) {
+        return false;
+      }
+      return true;
+    });
+
+    const smartResult = buildSmartBotHierarchy(working, scopedMembers.map(toRosterEntry), {
+      now: baseTs + stepCounter * 1000,
+      deviceId: selfDeviceId,
+      replaceExisting: request.replaceExisting && !isScoped,
+      overwriteExistingAssignments: request.replaceExisting && isScoped && !request.ungroupedOnly,
+    });
+    working = smartResult.config;
+    stepCounter += Math.max(1, scopedMembers.length);
+    if (smartResult.summary.skippedForLimits > 0) {
+      warnings.push(
+        `Smart grouping hit the ${BOT_HIERARCHY_MAX_FOLDERS}-folder limit (${smartResult.summary.skippedForLimits} target path(s) degraded or skipped).`,
+      );
+    }
+    for (const key of smartResult.summary.matchedItemKeys) {
+      reasonByKey.set(key, 'smart');
+    }
+  }
+
+  if (request.rules?.length) {
+    for (const rule of request.rules) {
+      const stepTs = baseTs + stepCounter * 1000;
+      stepCounter += 1;
+
+      let candidateKeys = resolveExplicitRuleItemKeys(rule, members, selfDeviceId);
+      if (rule.overwriteExisting === false) {
+        candidateKeys = candidateKeys.filter((key) => resolveItemFolderId(working, key) === null);
+      }
+      if (candidateKeys.length === 0) {
+        unmatchedRules += 1;
+        continue;
+      }
+
+      if (rule.unassign) {
+        working = assignItemsToFolder(working, candidateKeys, null, { now: stepTs, deviceId: selfDeviceId });
+        for (const k of candidateKeys) reasonByKey.set(k, 'rule:unassign');
+        continue;
+      }
+
+      if (rule.folderId) {
+        if (!working.folders[rule.folderId]) {
+          throw new TeammateGroupMutationError('NOT_FOUND', `Folder "${rule.folderId}" not found.`);
+        }
+        working = assignItemsToFolder(working, candidateKeys, rule.folderId, {
+          now: stepTs,
+          deviceId: selfDeviceId,
+        });
+        for (const k of candidateKeys) reasonByKey.set(k, `rule:folder:${rule.folderId}`);
+        continue;
+      }
+
+      const segments = splitHierarchyPathSegments(rule.targetPath ?? '');
+      if (segments.length === 0) {
+        throw new TeammateGroupMutationError('INVALID_ARGS', 'Rule target_path must not be empty.');
+      }
+      if (segments.length > BOT_HIERARCHY_MAX_DEPTH) {
+        throw new TeammateGroupMutationError(
+          'LIMIT_EXCEEDED',
+          `Rule target_path "${rule.targetPath}" exceeds maximum depth of ${BOT_HIERARCHY_MAX_DEPTH}.`,
+        );
+      }
+
+      const ruleSpec: BotBatchOrganizeRule = {
+        type: 'assign',
+        folderPath: segments,
+        itemKeys: candidateKeys,
+      };
+      const ruleResult = applyBotBatchOrganize(working, rosterEntries, [ruleSpec], {
+        now: stepTs,
+        deviceId: selfDeviceId,
+        overwriteExistingAssignments: true,
+      });
+      working = ruleResult.config;
+      if (ruleResult.summary.skippedForLimits > 0) {
+        warnings.push(`Folder limit (${BOT_HIERARCHY_MAX_FOLDERS}) prevented full creation of "${segments.join('/')}".`);
+      }
+      for (const k of candidateKeys) reasonByKey.set(k, `rule:${segments.join('/')}`);
+    }
+  }
+
+  const afterConfig = normalizeBotHierarchyConfig(working);
+
+  // Build structural folder diff between beforeConfig and afterConfig.
+  const beforePathById = new Map(flattenFolderOptions(beforeConfig).map((o) => [o.id, o.path.join('/')]));
+  const afterPathById = new Map(flattenFolderOptions(afterConfig).map((o) => [o.id, o.path.join('/')]));
+  const folderChanges: TeammateFolderChangeWire[] = [];
+  let foldersCreated = 0;
+  let foldersRenamed = 0;
+  let foldersMoved = 0;
+  let foldersDeleted = 0;
+
+  for (const [id, folder] of Object.entries(afterConfig.folders)) {
+    const prev = beforeConfig.folders[id];
+    const path = afterPathById.get(id) ?? folder.name;
+    if (!prev) {
+      foldersCreated += 1;
+      folderChanges.push({ action: 'created', folderId: id, name: folder.name, path });
+      continue;
+    }
+    const previousPath = beforePathById.get(id) ?? prev.name;
+    if (prev.name !== folder.name) {
+      foldersRenamed += 1;
+      folderChanges.push({
+        action: 'renamed',
+        folderId: id,
+        name: folder.name,
+        previousName: prev.name,
+        path,
+        previousPath,
+      });
+    }
+    if ((prev.parentId ?? null) !== (folder.parentId ?? null)) {
+      foldersMoved += 1;
+      folderChanges.push({
+        action: 'moved',
+        folderId: id,
+        name: folder.name,
+        path,
+        previousPath,
+      });
+    }
+  }
+
+  for (const [id, prev] of Object.entries(beforeConfig.folders)) {
+    if (!afterConfig.folders[id]) {
+      foldersDeleted += 1;
+      const previousPath = beforePathById.get(id) ?? prev.name;
+      folderChanges.push({
+        action: 'deleted',
+        folderId: id,
+        name: prev.name,
+        path: previousPath,
+        previousPath,
+      });
+    }
+  }
+
+  // Build assignment diff across known roster members + any explicitly referenced item keys.
+  const knownKeys = new Set(members.map((m) => m.itemKey));
+  const trackedMembers: TeammateGroupMemberWire[] = [...members];
+  for (const key of reasonByKey.keys()) {
+    if (!knownKeys.has(key)) {
+      knownKeys.add(key);
+      const isGroup = key.startsWith('group:');
+      const botId = key.startsWith('remote-bot:')
+        ? key.split(':').slice(2).join(':')
+        : key.replace(/^(?:bot|group):/, '');
+      trackedMembers.push({
+        botId,
+        itemKey: key,
+        name: botId,
+        kind: isGroup ? 'group' : key.startsWith('remote-bot:') ? 'remote' : 'local',
+        folderId: null,
+        breadcrumb: '',
+        breadcrumbParts: [],
+      });
+    }
+  }
+
+  const assignmentChanges: TeammateAssignmentChangeWire[] = [];
+  let teammatesAssigned = 0;
+  let teammatesUnassigned = 0;
+  let unchangedTeammates = 0;
+
+  for (const member of trackedMembers) {
+    const fromFolderId = resolveMemberFolderId(beforeConfig, member);
+    const toFolderId = resolveMemberFolderId(afterConfig, member);
+    if (fromFolderId === toFolderId) {
+      unchangedTeammates += 1;
+      continue;
+    }
+    const fromBreadcrumb = fromFolderId
+      ? getFolderBreadcrumb(beforeConfig, fromFolderId).map((f) => f.name).join('/')
+      : '';
+    const toBreadcrumb = toFolderId
+      ? getFolderBreadcrumb(afterConfig, toFolderId).map((f) => f.name).join('/')
+      : '';
+    if (toFolderId !== null) teammatesAssigned += 1;
+    else teammatesUnassigned += 1;
+    const reason = reasonByKey.get(member.itemKey);
+    assignmentChanges.push({
+      botId: member.botId,
+      itemKey: member.itemKey,
+      name: member.name,
+      kind: member.kind,
+      fromFolderId,
+      fromBreadcrumb,
+      toFolderId,
+      toBreadcrumb,
+      ...(reason ? { reason } : {}),
+    });
+  }
+
+  const view = buildTeammateGroupsView(afterConfig, members, selfDeviceId);
+  const modeCount =
+    Number(Boolean(request.smart)) +
+    Number(Boolean(request.rules?.length)) +
+    Number(Boolean(request.operations?.length));
+  const mode: OrganizeTeammateGroupsResultWire['mode'] =
+    modeCount > 1
+      ? 'mixed'
+      : request.smart
+        ? 'smart'
+        : request.rules?.length
+          ? 'rules'
+          : 'operations';
+
+  return {
+    nextConfig: afterConfig,
+    result: {
+      dryRun: request.dryRun,
+      applied: !request.dryRun,
+      mode,
+      updatedAt: new Date(afterConfig.updatedAt || Date.now()).toISOString(),
+      summary: {
+        foldersCreated,
+        foldersRenamed,
+        foldersMoved,
+        foldersDeleted,
+        teammatesMoved: teammatesAssigned + teammatesUnassigned,
+        teammatesAssigned,
+        teammatesUnassigned,
+        unchangedTeammates,
+        unmatchedRules,
+        warnings,
+      },
+      folderChanges,
+      assignmentChanges,
+      tree: view.ok ? view.data.tree : [],
+      stats: view.ok
+        ? view.data.stats
+        : {
+            totalFolders: Object.keys(afterConfig.folders).length,
+            totalTeammates: members.length,
+            groupedCount: 0,
+            ungroupedCount: members.length,
+            matchedTeammates: members.length,
+            matchedFolders: Object.keys(afterConfig.folders).length,
+          },
+    },
+  };
+}
+
+function createTeammateGroupsProvider(
+  deps: DesktopMcpProvidersDeps,
+  withAccountDataAccess: <T>(
+    sessionId: string | undefined,
+    operation: (assertCurrent: () => Promise<void>) => Promise<T>,
+  ) => Promise<T>,
+): TeammateGroupsCallbacks {
+  return {
+    get: ({ callerSessionId, ...filter }) => {
+      if (isSessionSharedTaskActive(callerSessionId)) {
+        return Promise.resolve({
+          ok: false as const,
+          errorCode: 'FORBIDDEN' as const,
+          message: 'Not available in a shared task',
+        });
+      }
+      return withAccountDataAccess(callerSessionId, async (assertCurrent) => {
+        const roster = await collectTeammateHierarchyRoster(deps);
+        await assertCurrent();
+        if (!roster.ok) return roster;
+        const config = readBotHierarchyConfig();
+        const view = buildTeammateGroupsView(config, roster.members, roster.selfDeviceId, filter);
+        if (!view.ok) return view;
+        return { ok: true as const, ...view.data };
+      });
+    },
+    organize: (request) => {
+      if (isSessionSharedTaskActive(request.callerSessionId)) {
+        return Promise.resolve({
+          ok: false as const,
+          errorCode: 'FORBIDDEN' as const,
+          message: 'Not available in a shared task',
+        });
+      }
+      return withAccountDataAccess(request.callerSessionId, async (assertCurrent) => {
+        const roster = await collectTeammateHierarchyRoster(deps);
+        await assertCurrent();
+        if (!roster.ok) return roster;
+
+        try {
+          if (request.dryRun) {
+            const currentConfig = readBotHierarchyConfig();
+            const computed = computeOrganizedHierarchy(
+              currentConfig,
+              roster.members,
+              request,
+              roster.selfDeviceId,
+            );
+            return { ok: true as const, ...computed.result };
+          }
+
+          await assertTaskActionCurrent();
+          await assertCurrent();
+
+          const captured: { payload?: OrganizeTeammateGroupsResultWire } = {};
+          await mutateMainBotHierarchyConfig((currentConfig) => {
+            const computed = computeOrganizedHierarchy(
+              currentConfig,
+              roster.members,
+              request,
+              roster.selfDeviceId,
+            );
+            captured.payload = computed.result;
+            return computed.nextConfig;
+          });
+
+          const finalPayload = captured.payload;
+          if (!finalPayload) {
+            return {
+              ok: false as const,
+              errorCode: 'OPERATION_FAILED' as const,
+              message: 'Teammate hierarchy mutation did not produce a result.',
+            };
+          }
+          return { ok: true as const, ...finalPayload };
+        } catch (error) {
+          if (error instanceof TeammateGroupMutationError) {
+            return {
+              ok: false as const,
+              errorCode: error.code,
+              message: error.message,
+            };
+          }
+          throw error;
+        }
+      });
+    },
+  };
+}
 
 export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMcpProvider[] {
   setSessionPathAuthorizer((request) =>
@@ -1201,6 +2434,7 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
           }
         },
       },
+      teammateGroups: createTeammateGroupsProvider(deps, withAccountDataAccess),
       // 伙伴自己沉淀的真技能。归属同样由 callerSessionId 反查,工具面不收 botId。
       modelSettings: {
         call: ({ callerSessionId, ...input }, signal) => withAccountDataAccess(callerSessionId, async (assertCurrent) => {

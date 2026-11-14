@@ -7,7 +7,7 @@
  */
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Bot, ChevronDown, ChevronLeft, ChevronRight, Link2, Plus, Search, UserPlus } from 'lucide-react';
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, Folder, Link2, Plus, Search, UserPlus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,14 @@ import { getDataOwnerGeneration, isDataOwnerGenerationCurrent } from '@/contexts
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import type { BotGroupSummary } from '../../../shared/botGroupChat';
+import {
+  botHierarchyItemKey,
+  flattenFolderOptions,
+  getFolderBreadcrumb,
+  resolveBotFolderId,
+} from '../../../shared/botHierarchy';
 import { BotAvatar } from './BotAvatar';
+import { useBotHierarchy } from './botHierarchyClientStore';
 import { ChatInviteDialog } from './ChatInviteDialog';
 import { chatErrorKey } from './chatError';
 import { refreshBotGroups } from './botGroupStore';
@@ -35,8 +42,11 @@ const api = () => window.electronAPI.maker.chatServer;
 const SEARCH_FROM = 7;
 const ROW_HEIGHT = 32;
 
-type OwnedBot = { actorId: string; botId?: string; name: string };
+type OwnedBot = { actorId: string; botId?: string; name: string; avatar?: string | null; homeDeviceId?: string | null };
 type OwnedBots = { status: 'loading' } | { status: 'failed' } | { status: 'ready'; bots: OwnedBot[] };
+type InviteRow =
+  | { kind: 'folder'; key: string; label: string; depth: number; count: number }
+  | { kind: 'bot'; key: string; bot: OwnedBot; depth: number; folderName: string; folderPath: string };
 
 export function ChatGroupInviteMenu({ group, variant }: {
   group: Pick<BotGroupSummary, 'id' | 'members' | 'canInvite'>;
@@ -45,6 +55,7 @@ export function ChatGroupInviteMenu({ group, variant }: {
 }) {
   const { t } = useTranslation();
   const profiles = useBotProfiles();
+  const { config: hierarchyConfig } = useBotHierarchy();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'root' | 'bots'>('root');
   const [query, setQuery] = useState('');
@@ -68,8 +79,107 @@ export function ChatGroupInviteMenu({ group, variant }: {
 
   const addable = useMemo(() => owned.status === 'ready'
     ? owned.bots.filter(bot => !group.members.some(member => member.actorId === bot.actorId)) : [], [owned, group.members]);
+  const folderOptions = useMemo(() => flattenFolderOptions(hierarchyConfig), [hierarchyConfig]);
+  const hasHierarchy = folderOptions.length > 0;
+  const ungroupedLabel = t('bots.hierarchy.ungrouped');
   const needle = query.trim().toLocaleLowerCase();
-  const shown = useMemo(() => needle ? addable.filter(bot => bot.name.toLocaleLowerCase().includes(needle)) : addable, [addable, needle]);
+
+  const rows = useMemo<InviteRow[]>(() => {
+    const assignments = hierarchyConfig.assignments ?? {};
+    const enriched = addable.map((bot, originalIndex) => {
+      const folderId = hasHierarchy && bot.botId ? resolveBotFolderId(hierarchyConfig, bot.botId, bot.homeDeviceId) : null;
+      const breadcrumb = folderId ? getFolderBreadcrumb(hierarchyConfig, folderId) : [];
+      const names = breadcrumb.map(folder => folder.name);
+      const remoteKey = bot.botId && bot.homeDeviceId ? botHierarchyItemKey(bot.botId, bot.homeDeviceId) : '';
+      const canonicalKey = bot.botId ? botHierarchyItemKey(bot.botId) : '';
+      const assignment = (remoteKey && assignments[remoteKey]) || (canonicalKey && assignments[canonicalKey]) || undefined;
+      return {
+        bot,
+        folderId,
+        folderName: names[names.length - 1] ?? '',
+        folderPath: names.join(' / '),
+        folderPathSlash: names.join('/'),
+        order: assignment?.order ?? Number.MAX_SAFE_INTEGER,
+        originalIndex,
+      };
+    });
+
+    const filtered = needle
+      ? enriched.filter(entry =>
+          entry.bot.name.toLocaleLowerCase().includes(needle)
+          || (entry.folderPath && entry.folderPath.toLocaleLowerCase().includes(needle))
+          || (entry.folderPathSlash && entry.folderPathSlash.toLocaleLowerCase().includes(needle))
+          || (hasHierarchy && !entry.folderId && ungroupedLabel.toLocaleLowerCase().includes(needle)),
+        )
+      : enriched;
+
+    if (!hasHierarchy) {
+      return filtered.map(entry => ({
+        kind: 'bot',
+        key: entry.bot.actorId,
+        bot: entry.bot,
+        depth: 0,
+        folderName: '',
+        folderPath: '',
+      }));
+    }
+
+    const byFolder = new Map<string | null, typeof filtered>();
+    for (const entry of filtered) {
+      const bucket = byFolder.get(entry.folderId);
+      if (bucket) bucket.push(entry);
+      else byFolder.set(entry.folderId, [entry]);
+    }
+    for (const bucket of byFolder.values()) {
+      bucket.sort((a, b) => a.order - b.order || a.originalIndex - b.originalIndex);
+    }
+
+    const result: InviteRow[] = [];
+    for (const option of folderOptions) {
+      const bucket = byFolder.get(option.id);
+      if (!bucket || bucket.length === 0) continue;
+      result.push({
+        kind: 'folder',
+        key: `folder:${option.id}`,
+        label: option.pathLabel,
+        depth: option.depth,
+        count: bucket.length,
+      });
+      for (const entry of bucket) {
+        result.push({
+          kind: 'bot',
+          key: entry.bot.actorId,
+          bot: entry.bot,
+          depth: option.depth,
+          folderName: entry.folderName,
+          folderPath: entry.folderPath,
+        });
+      }
+    }
+
+    const ungrouped = byFolder.get(null);
+    if (ungrouped && ungrouped.length > 0) {
+      result.push({
+        kind: 'folder',
+        key: 'folder:__ungrouped__',
+        label: ungroupedLabel,
+        depth: 1,
+        count: ungrouped.length,
+      });
+      for (const entry of ungrouped) {
+        result.push({
+          kind: 'bot',
+          key: entry.bot.actorId,
+          bot: entry.bot,
+          depth: 0,
+          folderName: '',
+          folderPath: '',
+        });
+      }
+    }
+    return result;
+  }, [addable, folderOptions, hasHierarchy, hierarchyConfig, needle, ungroupedLabel]);
+
   const profileById = useMemo(() => new Map(profiles.map(profile => [profile.id, profile])), [profiles]);
 
   const reset = () => { setView('root'); setQuery(''); };
@@ -150,13 +260,13 @@ export function ChatGroupInviteMenu({ group, variant }: {
               ? <p className="px-2 py-2 text-13 leading-[1.54] text-[var(--text-secondary)]">{t(key('inviteBotsAllIn'))}</p>
               : <>
                 {addable.length >= SEARCH_FROM && <div {...menuSkipAttrs} className="relative mx-0.5 mb-1.5 mt-0.5">
-                  <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                  <Input size="sm" autoFocus value={query} onChange={setQuery} placeholder={t(key('searchTeammates'))} aria-label={t(key('searchTeammates'))}
+                  <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 z-[1] -translate-y-1/2 text-[var(--text-tertiary)]" />
+                  <Input type="search" size="sm" autoFocus value={query} onChange={setQuery} placeholder={t(key('searchTeammates'))} aria-label={t(key('searchTeammates'))}
                     inputClassName="pl-8" onKeyDown={searchKeys} />
                 </div>}
-                {shown.length === 0
+                {rows.length === 0
                   ? <p className="px-2 py-2 text-13 leading-[1.54] text-[var(--text-secondary)] [overflow-wrap:anywhere]">{t(key('inviteBotsNoMatch'), { query: query.trim() })}</p>
-                  : <InviteBotList listRef={list} bots={shown} avatarFor={bot => profileById.get(bot.botId ?? '')} onAdd={bot => void add(bot)} />}
+                  : <InviteBotList listRef={list} rows={rows} avatarFor={bot => profileById.get(bot.botId ?? '')} onAdd={bot => void add(bot)} />}
                 {addable.length >= SEARCH_FROM && !needle && <div className="mt-1 border-t border-[var(--cmd-palette-border)] px-2 pb-0.5 pt-1.5 text-12 leading-[1.33] tabular-nums text-[var(--text-tertiary)]">
                   {t(key('inviteBotsCount'), { count: addable.length })}</div>}
               </>)}
@@ -170,29 +280,51 @@ export function ChatGroupInviteMenu({ group, variant }: {
 }
 
 /** Only the rows in view are mounted, so ten thousand teammates scroll like ten. */
-function InviteBotList({ bots, avatarFor, onAdd, listRef }: {
-  bots: readonly OwnedBot[];
+function InviteBotList({ rows, avatarFor, onAdd, listRef }: {
+  rows: readonly InviteRow[];
   avatarFor: (bot: OwnedBot) => { name: string; avatar?: string | null; avatarColor?: string | null; avatarUrl?: string | null } | undefined;
   onAdd: (bot: OwnedBot) => void;
   listRef: RefObject<HTMLDivElement | null>;
 }) {
   const virtualizer = useVirtualizer({
-    count: bots.length,
+    count: rows.length,
     getScrollElement: () => listRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 8,
-    getItemKey: index => bots[index].actorId,
+    getItemKey: index => rows[index].key,
     initialRect: { width: 276, height: 296 },
   });
   return <div ref={listRef} className="max-h-[296px] overflow-y-auto overscroll-contain" data-testid="chat-group-invite-bots">
     <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
       {virtualizer.getVirtualItems().map(item => {
-        const bot = bots[item.index];
-        const profile = avatarFor(bot);
-        return <DropdownMenuItem key={item.key} className="absolute left-0 top-0 w-full gap-2.5" style={{ transform: `translateY(${item.start}px)` }}
-          onSelect={() => onAdd(bot)}>
-          <BotAvatar bot={{ name: bot.name, avatar: profile?.avatar, avatarColor: profile?.avatarColor, avatarUrl: profile?.avatarUrl }} size="xs" />
-          <span className="min-w-0 flex-1 truncate">{bot.name}</span>
+        const row = rows[item.index];
+        if (row.kind === 'folder') {
+          const indentPx = 8 + Math.max(0, row.depth - 1) * 10;
+          return <DropdownMenuLabel
+            key={item.key}
+            style={{ transform: `translateY(${item.start}px)`, paddingLeft: `${indentPx}px` }}
+            className="absolute left-0 top-0 flex h-8 w-full items-center gap-1.5 py-0 pr-2 text-11 font-medium text-[var(--text-tertiary)]"
+          >
+            <Folder size={12} aria-hidden className="shrink-0" />
+            <span className="min-w-0 flex-1 truncate" title={row.label}>{row.label}</span>
+            <span className="shrink-0 tabular-nums">{row.count}</span>
+          </DropdownMenuLabel>;
+        }
+        const profile = avatarFor(row.bot);
+        const indentPx = row.depth > 0 ? 8 + row.depth * 10 : undefined;
+        return <DropdownMenuItem
+          key={item.key}
+          className="absolute left-0 top-0 h-8 w-full gap-2.5"
+          style={{
+            transform: `translateY(${item.start}px)`,
+            ...(indentPx !== undefined ? { paddingLeft: `${indentPx}px` } : {}),
+          }}
+          title={row.folderPath ? `${row.bot.name} — ${row.folderPath}` : row.bot.name}
+          onSelect={() => onAdd(row.bot)}
+        >
+          <BotAvatar bot={{ name: row.bot.name, avatar: profile?.avatar ?? row.bot.avatar, avatarColor: profile?.avatarColor, avatarUrl: profile?.avatarUrl }} size="xs" />
+          <span className="min-w-0 flex-1 truncate">{row.bot.name}</span>
+          {row.folderName ? <span aria-hidden className="max-w-24 shrink-0 truncate text-11 text-[var(--text-tertiary)]">{row.folderName}</span> : null}
         </DropdownMenuItem>;
       })}
     </div>

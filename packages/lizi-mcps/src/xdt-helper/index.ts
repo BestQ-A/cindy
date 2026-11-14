@@ -194,6 +194,24 @@ export {
   type TeammateHomeComputerWire,
 } from './teammate_home.js';
 export {
+  registerTeammateGroupTools,
+  type TeammateGroupsCallbacks,
+  type TeammateGroupKindWire,
+  type TeammateGroupFolderWire,
+  type TeammateGroupMemberWire,
+  type TeammateGroupTreeNodeWire,
+  type TeammateGroupStatsWire,
+  type GetTeammateGroupsRequestWire,
+  type GetTeammateGroupsResultWire,
+  type OrganizeTeammateRuleWire,
+  type OrganizeTeammateOperationWire,
+  type OrganizeTeammateGroupsRequestWire,
+  type TeammateFolderChangeWire,
+  type TeammateAssignmentChangeWire,
+  type OrganizeTeammateGroupsResultWire,
+  type TeammateGroupErrorCode,
+} from './teammate_groups.js';
+export {
   registerBotCapabilityTools,
   buildFindBotCapabilitiesDescription,
   withCindyGatedBotToolDescriptions,

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>团队大屏</title>
+  <link rel="stylesheet" href="view.css">
+  <script src="view.js" defer></script>
+</head>
+<body>
+  <main class="dashboard">
+    <header class="page-heading">
+      <div><h1>团队大屏</h1><p id="updated-at">正在连接 Cindy…</p></div>
+      <button id="refresh" class="button" type="button">刷新</button>
+    </header>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section aria-label="团队运行概况" class="summary" id="summary"></section>
+    <section class="roster-section" aria-labelledby="roster-title">
+      <div class="section-heading">
+        <div class="section-heading-main"><h2 id="roster-title">伙伴</h2><span id="roster-count" class="secondary"></span></div>
+        <div class="roster-controls" role="group" aria-label="视图控制">
+          <button id="group-by-computer" class="button toggle-button" type="button" aria-pressed="false">按电脑分组</button>
+          <button id="compact-mode" class="button toggle-button" type="button" aria-pressed="false">紧凑模式</button>
+          <button id="expand-all" class="button" type="button" disabled>全部展开</button>
+          <button id="collapse-all" class="button" type="button" disabled>全部折叠</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <label class="sr-only" for="search">搜索伙伴</label><input id="search" type="search" placeholder="搜索名称、职责或分组" autocomplete="off">
+        <label class="sr-only" for="scope">伙伴范围</label><select id="scope"><option value="wanjie">万界团队</option><option value="all">全部伙伴</option></select>
+        <label class="sr-only" for="device">所在电脑</label><select id="device"><option value="all">全部电脑</option></select>
+      </div>
+      <div class="filters" id="filters" aria-label="运行状态筛选"></div>
+      <div id="roster" class="roster" aria-live="polite"><p class="empty">正在读取伙伴状态…</p></div>
+    </section>
+    <section class="verification-section" aria-labelledby="verification-title">
+      <div class="section-heading"><h2 id="verification-title">逐岗运行验证</h2><button id="verify" class="button" type="button" disabled>接续逐岗验证</button></div>
+      <p id="verification-time" class="secondary"></p>
+      <p id="verification-run" class="secondary" role="status"></p>
+      <p id="verification-summary" class="secondary">尚未收到本轮逐岗验证结果。</p>
+      <div id="verification-results" class="verification-results"></div>
+    </section>
+    <section class="devices-section" aria-labelledby="devices-title">
+      <div class="section-heading"><h2 id="devices-title">电脑与算力</h2><span class="secondary">硬件采集快照</span></div>
+      <div id="devices" class="devices"><p class="empty">尚未载入电脑配置。</p></div>
+    </section>
+  </main>
+  <dialog id="details" aria-labelledby="detail-title">
+    <div class="detail-heading"><div><h2 id="detail-title"></h2><p id="detail-meta" class="secondary"></p></div><button id="close-details" class="button" type="button" aria-label="关闭详情">关闭</button></div>
+    <div id="detail-content" class="detail-content"></div>
+    <div class="detail-footer"><span id="open-status" role="status" class="secondary"></span><button id="open-companion" class="button primary" type="button">在 Cindy 中打开</button></div>
+  </dialog>
+</body>
+</html>

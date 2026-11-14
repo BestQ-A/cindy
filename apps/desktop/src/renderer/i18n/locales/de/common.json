@@ -12311,6 +12311,31 @@
       "toggle": "„{{name}}“ einschalten",
       "manage": "Unter Automatisierungen verwalten",
       "create": "Unter Automatisierungen erstellen"
+    },
+    "hierarchy": {
+      "menuTrigger": "Anzeigeoptionen",
+      "newFolder": "Neuer Ordner",
+      "newSubfolder": "Neuer Unterordner",
+      "defaultFolderName": "Unbenannter Ordner",
+      "smartOrganize": "Intelligentes Sortieren",
+      "smartOrganizeDone": "Freunde sortiert",
+      "smartOrganizeEmpty": "Keine Freunde zum Sortieren vorhanden",
+      "groupByComputer": "Nach Computer gruppieren",
+      "compactDensity": "Kompakte Ansicht",
+      "expandAll": "Alle ausklappen",
+      "collapseAll": "Alle einklappen",
+      "renameFolder": "Ordner umbenennen",
+      "renameInputLabel": "Ordnername",
+      "deleteFolder": "Ordner löschen",
+      "moveToFolder": "In Ordner verschieben",
+      "moveOutOfFolder": "Aus Ordner entfernen",
+      "moveToRoot": "Auf oberste Ebene verschieben",
+      "createAndMove": "Ordner erstellen und verschieben",
+      "ungrouped": "Nicht gruppiert",
+      "localComputer": "Dieser Computer",
+      "selectGroupAll": "Alle in dieser Gruppe auswählen",
+      "deselectGroupAll": "Auswahl für diese Gruppe aufheben",
+      "searchMembersPlaceholder": "Freunde suchen…"
     }
   },
   "common": {

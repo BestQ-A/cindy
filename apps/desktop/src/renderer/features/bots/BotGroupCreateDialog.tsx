@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Check } from 'lucide-react';
+import { Check, Folder, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,14 @@ import { Input } from '@/components/ui/input';
 import { getDataOwnerGeneration, isDataOwnerGenerationCurrent } from '@/contexts/dataOwnerGeneration';
 import { cn } from '@/lib/utils';
 import { BOT_GROUP_NAME_MAX_CHARS } from '../../../shared/botGroupChat';
+import {
+  botHierarchyItemKey,
+  flattenFolderOptions,
+  getFolderBreadcrumb,
+  resolveBotFolderId,
+} from '../../../shared/botHierarchy';
 import { BotAvatar } from './BotAvatar';
+import { useBotHierarchy } from './botHierarchyClientStore';
 import { botGroupApi, refreshBotGroups } from './botGroupStore';
 import { BOT_GROUP_MAX_MEMBERS, BOT_GROUP_MIN_MEMBERS, botGroupErrorKey } from './botGroupPresentation';
 import { useBotProfiles, type BotProfile } from './botStore';
@@ -43,13 +50,16 @@ export function BotGroupCreateDialog({
 }) {
   const { t } = useTranslation();
   const bots = useBotProfiles();
-  type Candidate = Pick<BotProfile, 'id' | 'name' | 'avatar' | 'status' | 'enabled'>;
+  const { config: hierarchyConfig } = useBotHierarchy();
+  type Candidate = Pick<BotProfile, 'id' | 'name' | 'avatar' | 'status' | 'enabled'> & {
+    deviceId?: string;
+  };
   const [cloudBots, setCloudBots] = useState<Candidate[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(!privateChatBotId);
   const [membersLoadFailed, setMembersLoadFailed] = useState(false);
   const [membersLoadAttempt, setMembersLoadAttempt] = useState(0);
   const [serverBacked, setServerBacked] = useState(false);
-  const candidates = useMemo(() => serverBacked ? cloudBots : pickableBots(bots), [bots, cloudBots, serverBacked]);
+  const candidates = useMemo<readonly Candidate[]>(() => serverBacked ? cloudBots : pickableBots(bots), [bots, cloudBots, serverBacked]);
   const selectableCount = candidates.filter(isSelectable).length;
   useEffect(() => {
     if (privateChatBotId) return;
@@ -67,7 +77,12 @@ export function BotGroupCreateDialog({
           if (!current()) return;
           if (!result.ok) throw new Error(result.errorCode);
           setCloudBots(result.bots.flatMap(bot => bot.botId ? [{
-            id: bot.botId, name: bot.name, avatar: bot.avatar ?? '', status: 'active' as const, enabled: true,
+            id: bot.botId,
+            name: bot.name,
+            avatar: bot.avatar ?? '',
+            status: 'active' as const,
+            enabled: true,
+            deviceId: bot.homeDeviceId ?? undefined,
           }] : []));
         }
       } catch {
@@ -80,6 +95,7 @@ export function BotGroupCreateDialog({
   }, [privateChatBotId, membersLoadAttempt]);
   const minMembers = privateChatBotId ? 1 : serverBacked ? 0 : BOT_GROUP_MIN_MEMBERS;
   const [name, setName] = useState('');
+  const [memberQuery, setMemberQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [nameError, setNameError] = useState(false);
   const [membersError, setMembersError] = useState(false);
@@ -89,9 +105,145 @@ export function BotGroupCreateDialog({
   const nameInputRef = useRef<HTMLInputElement>(null);
   const firstMemberRef = useRef<HTMLButtonElement>(null);
 
+  const folderOptions = useMemo(() => flattenFolderOptions(hierarchyConfig), [hierarchyConfig]);
+  const hasHierarchy = folderOptions.length > 0;
+  const ungroupedLabel = t('bots.hierarchy.ungrouped');
+
+  type CandidateEntry = {
+    bot: Candidate;
+    folderId: string | null;
+    breadcrumbLabel: string;
+    breadcrumbSlash: string;
+    order: number;
+    originalIndex: number;
+  };
+
+  type PickerSection = {
+    key: string;
+    folderId: string | null;
+    label: string;
+    depth: number;
+    directEntries: CandidateEntry[];
+    subtreeSelectableIds: string[];
+  };
+
+  const candidateEntries = useMemo<CandidateEntry[]>(() => {
+    const assignments = hierarchyConfig.assignments ?? {};
+    return candidates.map((bot, originalIndex) => {
+      const folderId = hasHierarchy ? resolveBotFolderId(hierarchyConfig, bot.id, bot.deviceId) : null;
+      const breadcrumb = folderId ? getFolderBreadcrumb(hierarchyConfig, folderId) : [];
+      const names = breadcrumb.map((folder) => folder.name);
+      const remoteKey = bot.deviceId ? botHierarchyItemKey(bot.id, bot.deviceId) : '';
+      const canonicalKey = botHierarchyItemKey(bot.id);
+      const assignment = (remoteKey && assignments[remoteKey]) || assignments[canonicalKey];
+      return {
+        bot,
+        folderId,
+        breadcrumbLabel: names.join(' / '),
+        breadcrumbSlash: names.join('/'),
+        order: assignment?.order ?? Number.MAX_SAFE_INTEGER,
+        originalIndex,
+      };
+    });
+  }, [candidates, hasHierarchy, hierarchyConfig]);
+
+  const orderedCandidates = useMemo(() => {
+    if (!hasHierarchy) return candidates;
+    const byFolder = new Map<string | null, CandidateEntry[]>();
+    for (const entry of candidateEntries) {
+      const list = byFolder.get(entry.folderId);
+      if (list) list.push(entry);
+      else byFolder.set(entry.folderId, [entry]);
+    }
+    for (const list of byFolder.values()) {
+      list.sort((a, b) => a.order - b.order || a.originalIndex - b.originalIndex);
+    }
+    const result: Candidate[] = [];
+    for (const option of folderOptions) {
+      const list = byFolder.get(option.id);
+      if (list) {
+        for (const entry of list) result.push(entry.bot);
+      }
+    }
+    const ungrouped = byFolder.get(null);
+    if (ungrouped) {
+      for (const entry of ungrouped) result.push(entry.bot);
+    }
+    return result;
+  }, [candidateEntries, candidates, folderOptions, hasHierarchy]);
+
+  const filteredEntries = useMemo(() => {
+    const needle = memberQuery.trim().toLocaleLowerCase();
+    if (!needle) return candidateEntries;
+    return candidateEntries.filter((entry) => {
+      if (entry.bot.name.toLocaleLowerCase().includes(needle)) return true;
+      if (entry.breadcrumbLabel && entry.breadcrumbLabel.toLocaleLowerCase().includes(needle)) return true;
+      if (entry.breadcrumbSlash && entry.breadcrumbSlash.toLocaleLowerCase().includes(needle)) return true;
+      if (hasHierarchy && !entry.folderId && ungroupedLabel.toLocaleLowerCase().includes(needle)) return true;
+      return false;
+    });
+  }, [candidateEntries, hasHierarchy, memberQuery, ungroupedLabel]);
+
+  const pickerSections = useMemo<PickerSection[]>(() => {
+    if (!hasHierarchy) return [];
+    const byFolder = new Map<string | null, CandidateEntry[]>();
+    for (const entry of filteredEntries) {
+      const list = byFolder.get(entry.folderId);
+      if (list) list.push(entry);
+      else byFolder.set(entry.folderId, [entry]);
+    }
+    for (const list of byFolder.values()) {
+      list.sort((a, b) => a.order - b.order || a.originalIndex - b.originalIndex);
+    }
+    const sections: PickerSection[] = [];
+    for (let i = 0; i < folderOptions.length; i += 1) {
+      const option = folderOptions[i]!;
+      const directEntries = byFolder.get(option.id) ?? [];
+      let subtreeCount = directEntries.length;
+      const subtreeSelectableIds = directEntries
+        .filter((entry) => isSelectable(entry.bot))
+        .map((entry) => entry.bot.id);
+      for (let j = i + 1; j < folderOptions.length; j += 1) {
+        const descendant = folderOptions[j]!;
+        if (descendant.depth <= option.depth) break;
+        const childEntries = byFolder.get(descendant.id);
+        if (childEntries) {
+          subtreeCount += childEntries.length;
+          for (const entry of childEntries) {
+            if (isSelectable(entry.bot)) subtreeSelectableIds.push(entry.bot.id);
+          }
+        }
+      }
+      if (subtreeCount === 0) continue;
+      sections.push({
+        key: `folder:${option.id}`,
+        folderId: option.id,
+        label: option.pathLabel,
+        depth: option.depth,
+        directEntries,
+        subtreeSelectableIds,
+      });
+    }
+    const ungroupedEntries = byFolder.get(null) ?? [];
+    if (ungroupedEntries.length > 0) {
+      sections.push({
+        key: 'folder:__ungrouped__',
+        folderId: null,
+        label: ungroupedLabel,
+        depth: 1,
+        directEntries: ungroupedEntries,
+        subtreeSelectableIds: ungroupedEntries
+          .filter((entry) => isSelectable(entry.bot))
+          .map((entry) => entry.bot.id),
+      });
+    }
+    return sections;
+  }, [filteredEntries, folderOptions, hasHierarchy, ungroupedLabel]);
+
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   // Speaking order follows the picker's order, not the click order.
-  const orderedSelection = privateChatBotId ? [privateChatBotId] : candidates
-    .filter((bot) => selectedIds.includes(bot.id))
+  const orderedSelection = privateChatBotId ? [privateChatBotId] : orderedCandidates
+    .filter((bot) => selectedSet.has(bot.id))
     .map((bot) => bot.id);
   const atLimit = orderedSelection.length >= BOT_GROUP_MAX_MEMBERS;
 
@@ -103,6 +255,28 @@ export function BotGroupCreateDialog({
       return [...current, botId];
     });
     setMembersError(false);
+  };
+
+  const toggleGroup = (groupSelectableIds: readonly string[], allGroupSelected: boolean) => {
+    if (busy || groupSelectableIds.length === 0) return;
+    setSubmitError(null);
+    setMembersError(false);
+    setSelectedIds((current) => {
+      if (allGroupSelected) {
+        const removeSet = new Set(groupSelectableIds);
+        return current.filter((id) => !removeSet.has(id));
+      }
+      const currentSet = new Set(current);
+      const next = [...current];
+      for (const id of groupSelectableIds) {
+        if (next.length >= BOT_GROUP_MAX_MEMBERS) break;
+        if (!currentSet.has(id)) {
+          currentSet.add(id);
+          next.push(id);
+        }
+      }
+      return next;
+    });
   };
 
   const submit = async (event?: FormEvent) => {
@@ -153,6 +327,54 @@ export function BotGroupCreateDialog({
       busyRef.current = false;
       setBusy(false);
     }
+  };
+
+  const renderCandidateButton = (bot: Candidate, isFirst: boolean, paddingLeftPx?: number) => {
+    const checked = selectedSet.has(bot.id);
+    const selectable = isSelectable(bot);
+    const disabled = busy || !selectable || (!checked && atLimit);
+    return (
+      <button
+        key={bot.id}
+        ref={isFirst ? firstMemberRef : undefined}
+        type="button"
+        role="checkbox"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => toggle(bot.id)}
+        style={paddingLeftPx !== undefined ? { paddingLeft: `${paddingLeftPx}px` } : undefined}
+        className={cn(
+          'flex min-h-10 w-full items-center gap-2.5 rounded-lg py-1.5 text-left text-13 text-[var(--text-primary)] outline-none transition-colors',
+          paddingLeftPx !== undefined ? 'pr-2.5' : 'px-2.5',
+          'focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]',
+          'enabled:hover:bg-[var(--model-item-hover)] disabled:cursor-not-allowed',
+          !selectable && 'opacity-60',
+        )}
+      >
+        <BotAvatar bot={bot} size="sm" />
+        <span className="min-w-0 flex-1 truncate">{bot.name}</span>
+        {!selectable ? (
+          <span className="shrink-0 text-12 text-[var(--text-tertiary)]">
+            {t(
+              bot.status === 'paused'
+                ? 'bots.groupChat.memberStatus.paused'
+                : 'bots.groupChat.memberStatus.unavailable',
+            )}
+          </span>
+        ) : null}
+        <span
+          aria-hidden
+          className={cn(
+            'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border',
+            checked
+              ? 'border-transparent bg-[var(--accent-cta-bg-pure)] text-[var(--accent-pure-cta-fg)]'
+              : 'border-[var(--text-tertiary)]',
+          )}
+        >
+          {checked ? <Check size={12} strokeWidth={3} /> : null}
+        </span>
+      </button>
+    );
   };
 
   const membersHint =
@@ -230,57 +452,107 @@ export function BotGroupCreateDialog({
                   </span>
                 </div>
                 {candidates.length > 0 ? (
+                  <div className="relative">
+                    <Search
+                      size={14}
+                      aria-hidden
+                      className="pointer-events-none absolute left-3 top-1/2 z-[1] -translate-y-1/2 text-[var(--text-tertiary)]"
+                    />
+                    <Input
+                      type="search"
+                      size="sm"
+                      value={memberQuery}
+                      onChange={setMemberQuery}
+                      placeholder={t('bots.hierarchy.searchMembersPlaceholder')}
+                      aria-label={t('bots.hierarchy.searchMembersPlaceholder')}
+                      inputClassName="pl-8"
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                        }
+                      }}
+                    />
+                  </div>
+                ) : null}
+                {candidates.length > 0 ? (
                   <div
                     role="group"
                     aria-labelledby="bot-group-create-members-label"
                     aria-describedby="bot-group-create-members-feedback"
                     className="flex max-h-72 flex-col gap-0.5 overflow-y-auto rounded-xl border border-[var(--border-default)] p-1"
                   >
-                    {candidates.map((bot, index) => {
-                      const checked = selectedIds.includes(bot.id);
-                      const selectable = isSelectable(bot);
-                      const disabled = busy || !selectable || (!checked && atLimit);
-                      return (
-                        <button
-                          key={bot.id}
-                          ref={index === 0 ? firstMemberRef : undefined}
-                          type="button"
-                          role="checkbox"
-                          aria-checked={checked}
-                          disabled={disabled}
-                          onClick={() => toggle(bot.id)}
-                          className={cn(
-                            'flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-13 text-[var(--text-primary)] outline-none transition-colors',
-                            'focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]',
-                            'enabled:hover:bg-[var(--model-item-hover)] disabled:cursor-not-allowed',
-                            !selectable && 'opacity-60',
-                          )}
-                        >
-                          <BotAvatar bot={bot} size="sm" />
-                          <span className="min-w-0 flex-1 truncate">{bot.name}</span>
-                          {!selectable ? (
-                            <span className="shrink-0 text-12 text-[var(--text-tertiary)]">
-                              {t(
-                                bot.status === 'paused'
-                                  ? 'bots.groupChat.memberStatus.paused'
-                                  : 'bots.groupChat.memberStatus.unavailable',
-                              )}
-                            </span>
-                          ) : null}
-                          <span
-                            aria-hidden
-                            className={cn(
-                              'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border',
-                              checked
-                                ? 'border-transparent bg-[var(--accent-cta-bg-pure)] text-[var(--accent-pure-cta-fg)]'
-                                : 'border-[var(--text-tertiary)]',
-                            )}
-                          >
-                            {checked ? <Check size={12} strokeWidth={3} /> : null}
-                          </span>
-                        </button>
-                      );
-                    })}
+                    {filteredEntries.length === 0 ? (
+                      <p className="px-2.5 py-3 text-center text-12 text-[var(--text-tertiary)] [overflow-wrap:anywhere]">
+                        {t('bots.groupChat.server.settings.inviteBotsNoMatch', { query: memberQuery.trim() })}
+                      </p>
+                    ) : hasHierarchy ? (
+                      (() => {
+                        let attachedFirstRef = false;
+                        return pickerSections.map((section) => {
+                          const selectedInGroup = section.subtreeSelectableIds.filter((id) => selectedSet.has(id)).length;
+                          const allGroupSelected =
+                            section.subtreeSelectableIds.length > 0 &&
+                            (selectedInGroup === section.subtreeSelectableIds.length ||
+                              selectedInGroup >= BOT_GROUP_MAX_MEMBERS);
+                          const groupActionDisabled =
+                            busy || section.subtreeSelectableIds.length === 0 || (!allGroupSelected && atLimit);
+                          const headerIndentPx = 8 + (section.depth - 1) * 12;
+                          const rowIndentPx = section.folderId ? 10 + section.depth * 12 : 10;
+                          return (
+                            <div
+                              key={section.key}
+                              data-folder-section={section.folderId ?? 'ungrouped'}
+                              data-depth={section.depth}
+                              className="flex flex-col gap-0.5"
+                            >
+                              <div
+                                style={{ paddingLeft: `${headerIndentPx}px` }}
+                                className="flex min-h-7 items-center justify-between gap-2 rounded-lg pr-2 py-1"
+                              >
+                                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                                  <Folder
+                                    size={13}
+                                    aria-hidden
+                                    className="shrink-0 text-[var(--text-tertiary)]"
+                                  />
+                                  <span
+                                    title={section.label}
+                                    className="min-w-0 truncate text-12 font-medium text-[var(--text-secondary)]"
+                                  >
+                                    {section.label}
+                                  </span>
+                                </span>
+                                {section.subtreeSelectableIds.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    disabled={groupActionDisabled}
+                                    onClick={() => toggleGroup(section.subtreeSelectableIds, allGroupSelected)}
+                                    className={cn(
+                                      'shrink-0 rounded-lg px-2 py-0.5 text-11 font-medium text-[var(--text-secondary)] outline-none transition-colors',
+                                      'focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
+                                      'enabled:hover:bg-[var(--model-item-hover)] enabled:hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50',
+                                    )}
+                                  >
+                                    {t(
+                                      allGroupSelected
+                                        ? 'bots.hierarchy.deselectGroupAll'
+                                        : 'bots.hierarchy.selectGroupAll',
+                                    )}
+                                  </button>
+                                ) : null}
+                              </div>
+                              {section.directEntries.map(({ bot }) => {
+                                const isFirst = !attachedFirstRef;
+                                if (isFirst) attachedFirstRef = true;
+                                return renderCandidateButton(bot, isFirst, rowIndentPx);
+                              })}
+                            </div>
+                          );
+                        });
+                      })()
+                    ) : (
+                      filteredEntries.map(({ bot }, index) => renderCandidateButton(bot, index === 0))
+                    )}
                   </div>
                 ) : null}
                 <div id="bot-group-create-members-feedback" className="text-12 leading-snug">

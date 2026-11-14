@@ -12265,6 +12265,31 @@
       "toggle": "啟用「{{name}}」",
       "manage": "在自動化頁面管理",
       "create": "去自動化頁面新建"
+    },
+    "hierarchy": {
+      "menuTrigger": "顯示設定",
+      "newFolder": "新建資料夾",
+      "newSubfolder": "新建子資料夾",
+      "defaultFolderName": "未命名資料夾",
+      "smartOrganize": "智慧整理",
+      "smartOrganizeDone": "已整理夥伴分組",
+      "smartOrganizeEmpty": "暫無可整理的夥伴",
+      "groupByComputer": "依電腦分組",
+      "compactDensity": "單行精簡檢視",
+      "expandAll": "全部展開",
+      "collapseAll": "全部收起",
+      "renameFolder": "重新命名資料夾",
+      "renameInputLabel": "資料夾名稱",
+      "deleteFolder": "刪除資料夾",
+      "moveToFolder": "移至資料夾",
+      "moveOutOfFolder": "移出資料夾",
+      "moveToRoot": "移至最上層",
+      "createAndMove": "新建並移入",
+      "ungrouped": "未分組",
+      "localComputer": "本機",
+      "selectGroupAll": "全選本組",
+      "deselectGroupAll": "取消全選本組",
+      "searchMembersPlaceholder": "搜尋夥伴…"
     }
   },
   "common": {
