@@ -1220,21 +1220,24 @@ export function devEnvPrefix(env = process.env, platform = process.platform) {
 
 function launchInSystemTerminal(mode) {
   if (process.platform === 'win32') {
-    const command = `cd /d ${cmdDoubleQuote(rootDir)} && ${devEnvPrefix()}${packageManagerCommand(mode)}`;
+    const logPath = desktopDevTerminalLogPath();
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    const command = `cd /d ${cmdDoubleQuote(rootDir)} && ${devEnvPrefix()}${packageManagerCommand(mode)} > ${cmdDoubleQuote(logPath)} 2>&1`;
     const script = [
       "Start-Process -FilePath 'cmd.exe'",
       `-ArgumentList @('/c', ${psSingleQuote(command)})`,
       `-WorkingDirectory ${psSingleQuote(rootDir)}`,
+      '-WindowStyle Hidden',
     ].join(' ');
     const result = run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
       stdio: 'inherit',
-      windowsHide: false,
+      windowsHide: true,
     });
     if (result.status !== 0) {
       throw new Error(`Failed to open cmd window (exit ${result.status ?? 1})`);
     }
-    console.log(`==> Opened desktop ${mode} dev in a new cmd window.`);
-    return;
+    console.log(`==> Started desktop ${mode} dev in the background. Log: ${logPath}`);
+    return logPath;
   }
 
   if (process.platform === 'darwin') {
