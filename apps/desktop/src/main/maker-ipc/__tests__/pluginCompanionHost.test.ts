@@ -527,3 +527,87 @@ it('falls back to self-device remote keys for local companions and prefers newer
     groupOrder: 0,
   });
 });
+
+it('merges local and remote taskFlow snapshots cleanly in taskFlow() and serveRemote list', async () => {
+  const remote = laptop(() => ({
+    version: 1,
+    companions: [farOnLaptop],
+    sessions: {},
+    conversations: { far: 'remote-s1' },
+    taskFlow: {
+      selfDeviceId: 'laptop',
+      selfDeviceName: 'optix-display',
+      observedAt: 900,
+      hiddenScheduledCount: 2,
+      nodes: [
+        {
+          id: 'session:laptop:remote-s1',
+          kind: 'session',
+          title: 'FarBot Task',
+          status: 'running',
+          deviceId: 'laptop',
+          sessionId: 'remote-s1',
+          createdAtMs: 500,
+          updatedAtMs: 850,
+        },
+      ],
+      edges: [],
+    },
+  }));
+
+  const host = createPluginCompanionHost({
+    ...deps(remote),
+    collectLocalTaskFlow: async () => ({
+      selfDeviceId: 'here',
+      selfDeviceName: 'Local-PC',
+      observedAt: 950,
+      hiddenScheduledCount: 1,
+      nodes: [
+        {
+          id: 'session:here:local-s1',
+          kind: 'session',
+          title: 'Local Coordinator',
+          status: 'running',
+          deviceId: 'here',
+          sessionId: 'local-s1',
+          createdAtMs: 400,
+          updatedAtMs: 900,
+        },
+        {
+          id: 'session:laptop:remote-s1',
+          kind: 'session',
+          title: 'Pending remote',
+          status: 'waiting',
+          deviceId: 'laptop',
+          sessionId: 'remote-s1',
+          isCrossDevice: true,
+          isPlaceholder: true,
+          createdAtMs: 450,
+          updatedAtMs: 450,
+        },
+      ],
+      edges: [
+        {
+          id: 'e-cross',
+          from: 'session:here:local-s1',
+          to: 'session:laptop:remote-s1',
+          kind: 'created_task',
+          timestampMs: 450,
+          isCrossDevice: true,
+        },
+      ],
+    }),
+  });
+
+  const merged = await host.taskFlow!(() => {});
+  if (!merged) throw new Error('expected merged taskFlow');
+  expect(merged.hiddenScheduledCount).toBe(3);
+  expect(merged.nodes).toHaveLength(2);
+  const farSess = merged.nodes.find(n => n.sessionId === 'remote-s1');
+  expect(farSess?.title).toBe('FarBot Task');
+  expect(farSess?.isPlaceholder).toBe(false);
+  expect(merged.edges[0]?.isCrossDevice).toBe(true);
+
+  const remotePayload = await host.serveRemote({ version: 1, kind: 'list' }) as { taskFlow?: { nodes: unknown[] } };
+  expect(remotePayload.taskFlow?.nodes).toHaveLength(2);
+});

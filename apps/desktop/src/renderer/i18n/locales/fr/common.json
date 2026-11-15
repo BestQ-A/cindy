@@ -10431,7 +10431,14 @@
       "back": "Retour",
       "progressSummary": "{{done}}/{{total}} Agents",
       "tokens": "{{value}} jetons",
-      "noProgress": "Aucun détail de progression"
+      "noProgress": "Aucun détail de progression",
+      "viewSwitcher": "Changer la vue des tâches en arrière-plan",
+      "viewList": "Liste",
+      "viewTimeline": "Chronologie & Dép.",
+      "timelineWindow": "Plage horaire",
+      "planStepsSection": "Dépendances du plan actuel",
+      "executionTimeline": "Chronologie d’exécution",
+      "untitledTask": "Tâche en arrière-plan"
     },
     "resourceUsage": {
       "sections": {
@@ -10646,7 +10653,8 @@
         "automations": "Automatisations",
         "plugins": "Plugins",
         "bots": "Amis",
-        "search": "Rechercher"
+        "search": "Rechercher",
+        "taskFlow": "Flux des tâches"
       }
     },
     "user": {
@@ -13676,7 +13684,16 @@
     },
     "planPill": {
       "step": "Étape {{current}} sur {{total}}",
-      "dismiss": "Fermer le plan"
+      "dismiss": "Fermer le plan",
+      "viewTabs": "Changer la vue du plan",
+      "modeList": "Liste",
+      "modeGantt": "Chronologie",
+      "modeDag": "Dépendances",
+      "ganttTimeAxis": "Progression temporelle réelle",
+      "ganttStageAxis": "Ordonné par dépendances",
+      "dagNoExplicitEdges": "Aucune dépendance blockedBy explicite ; les étapes peuvent s’exécuter en parallèle.",
+      "dagStage": "Étape {{index}}",
+      "blockedByPrefix": "Bloqué par"
     },
     "forkOrigin": {
       "label": "Créée à partir d'une autre session"
@@ -15017,7 +15034,8 @@
       "backToReviewSource": "Retour à la tâche source",
       "waitForReply": "En attente de votre réponse dans la zone du document…",
       "modelSwitchedFastModeOff": "Modèle changé, mode rapide désactivé",
-      "markedAsRead_many": "{{count}} exécutions marquées comme lues"
+      "markedAsRead_many": "{{count}} exécutions marquées comme lues",
+      "taskFlow": "Flux des tâches"
     },
     "remoteDesktopConfirmation": {
       "title": "Confirmation requise sur l'ordinateur distant",
@@ -20671,6 +20689,94 @@
     },
     "switchOffer": {
       "action": "Continuer avec {{model}}"
+    }
+  },
+  "taskFlow": {
+    "title": "Flux des tâches",
+    "subtitle": "Vue globale des dépendances, transferts multi-machines et progression temporelle",
+    "viewSwitcher": "Vue du flux des tâches",
+    "refresh": "Actualiser",
+    "searchPlaceholder": "Rechercher tâches, compagnons, ordinateurs ou dossiers…",
+    "filterStatusLabel": "Filtrer par statut",
+    "localDevice": "Ordinateur local",
+    "empty": "Aucune tâche ne correspond aux filtres.",
+    "views": {
+      "gantt": "Diagramme de Gantt",
+      "dag": "Graphe de dépendances"
+    },
+    "kpi": {
+      "totalNodes": "Nœuds totaux",
+      "runningNodes": "En cours",
+      "totalEdges": "Liens",
+      "crossDeviceEdges": "Inter-machines"
+    },
+    "statusFilter": {
+      "all": "Tous les statuts"
+    },
+    "toggles": {
+      "expandSteps": "Déplier les étapes",
+      "onlyDependencies": "Chaînes liées uniquement",
+      "includeScheduled": "Inclure planifiées ({{count}})"
+    },
+    "groupBy": {
+      "label": "Voies",
+      "hierarchy": "Par hiérarchie",
+      "computer": "Par ordinateur",
+      "chain": "Par chaîne"
+    },
+    "window": {
+      "label": "Fenêtre",
+      "1h": "1 h",
+      "6h": "6 h",
+      "24h": "24 h",
+      "7d": "7 j",
+      "all": "Tout"
+    },
+    "columns": {
+      "taskItem": "Tâche / Compagnon",
+      "count": "{{count}} éléments"
+    },
+    "status": {
+      "running": "En cours",
+      "waiting": "En attente",
+      "completed": "Terminée",
+      "failed": "Échouée",
+      "paused": "En pause",
+      "idle": "Inactif"
+    },
+    "nodeKind": {
+      "companion": "Compagnon",
+      "session": "Session",
+      "subagent": "Sous-agent",
+      "orca_worker": "Exécutant",
+      "group_step": "Étape de groupe",
+      "plan_step": "Étape du plan"
+    },
+    "edgeKind": {
+      "created_task": "Tâche créée",
+      "delegated": "Délégué",
+      "forked": "Dérivé",
+      "handoff": "Transfert",
+      "reported": "Rapporté",
+      "orca_dispatch": "Envoi d’équipe",
+      "subagent_spawn": "Sous-agent lancé",
+      "blocked_by": "Bloqué par"
+    },
+    "inspector": {
+      "title": "Détails du nœud",
+      "close": "Fermer les détails",
+      "openSession": "Ouvrir dans Cindy",
+      "computer": "Ordinateur",
+      "folder": "Dossier",
+      "createdAt": "Créé",
+      "startedAt": "Démarré",
+      "completedAt": "Terminé",
+      "elapsed": "Durée",
+      "upstream": "Dépendances amont ({{count}})",
+      "noUpstream": "Aucune dépendance amont",
+      "downstream": "Tâches aval ({{count}})",
+      "noDownstream": "Aucune tâche aval",
+      "internalSteps": "Étapes internes du plan ({{count}})"
     }
   }
 }

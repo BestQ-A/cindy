@@ -19,17 +19,24 @@
  *   --msg-tool-card-chevron: secondary(completed 置灰)
  */
 
-import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   ChevronDown,
   ChevronRight,
   CircleCheck,
   Circle,
+  Clock,
+  GitBranch,
+  Link2,
   ListTodo,
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { MessageRenderTodoItem } from '@cindy/maker-shared/message-render';
+import {
+  formatDuration,
+  type MessageRenderPlanStepTimeline,
+  type MessageRenderTodoItem,
+} from '@cindy/maker-shared/message-render';
 
 import { Spinner, type SpinnerIconComponent } from '@/components/ui/spinner';
 import { Tip } from '@/components/ui/tooltip';
@@ -40,8 +47,397 @@ import { cn } from '@/lib/utils';
 // ---------------------------------------------------------------------------
 
 export type TodoItem = MessageRenderTodoItem;
+export type PlanStepTimeline = MessageRenderPlanStepTimeline;
 
+type InlinePlanViewMode = 'list' | 'gantt' | 'dag';
 type FlyoutOpenMode = 'closed' | 'hover' | 'pinned';
+
+function safeTranslate(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  key: string,
+  fallback: string,
+  options?: Record<string, unknown>,
+): string {
+  try {
+    const out = t(key, { defaultValue: fallback, ...options });
+    if (!out || out === key || out.includes('undefined')) return fallback;
+    return out;
+  } catch {
+    return fallback;
+  }
+}
+
+function buildResolvedPlanSteps(
+  todos: readonly TodoItem[],
+  steps: readonly PlanStepTimeline[] | undefined,
+  planStartedAtMs?: number,
+): PlanStepTimeline[] {
+  if (steps && steps.length === todos.length) {
+    return [...steps];
+  }
+  const byContent = new Map<string, PlanStepTimeline>();
+  if (steps) {
+    for (const s of steps) byContent.set(s.content.trim(), s);
+  }
+  return todos.map((todo, index) => {
+    const matched = steps?.[index] ?? byContent.get(todo.content.trim());
+    return {
+      stepId: matched?.stepId ?? `step-${index + 1}`,
+      content: todo.content,
+      status: todo.status,
+      ...(todo.activeForm ? { activeForm: todo.activeForm } : {}),
+      ...(todo.blockedBy ?? matched?.blockedBy
+        ? { blockedBy: todo.blockedBy ?? matched?.blockedBy }
+        : {}),
+      ...(matched?.blocks ? { blocks: matched.blocks } : {}),
+      ...(todo.owner ?? matched?.owner ? { owner: todo.owner ?? matched?.owner } : {}),
+      createdAtMs: matched?.createdAtMs ?? planStartedAtMs,
+      startedAtMs: matched?.startedAtMs,
+      completedAtMs: matched?.completedAtMs,
+      updatedAtMs: matched?.updatedAtMs,
+    };
+  });
+}
+
+function stepDurationLabel(step: PlanStepTimeline, nowMs: number, animated: boolean): string | null {
+  const startMs = step.startedAtMs ?? step.createdAtMs;
+  if (typeof startMs !== 'number' || !Number.isFinite(startMs)) return null;
+  if (step.status === 'completed') {
+    const endMs = step.completedAtMs ?? step.updatedAtMs;
+    if (typeof endMs !== 'number' || !Number.isFinite(endMs)) return null;
+    return formatDuration(Math.max(1000, endMs - startMs));
+  }
+  if (step.status === 'in_progress') {
+    const endMs = animated ? nowMs : (step.updatedAtMs ?? nowMs);
+    return formatDuration(Math.max(1000, endMs - startMs));
+  }
+  return null;
+}
+
+function computePlanStepLayers(steps: readonly PlanStepTimeline[]): Map<string, number> {
+  const stepIds = new Set(steps.map((s) => s.stepId));
+  const memo = new Map<string, number>();
+  const visiting = new Set<string>();
+  const byId = new Map(steps.map((s) => [s.stepId, s]));
+
+  const depthOf = (id: string): number => {
+    if (memo.has(id)) return memo.get(id)!;
+    if (visiting.has(id)) return 0;
+    visiting.add(id);
+    const step = byId.get(id);
+    let maxUpstream = -1;
+    for (const up of step?.blockedBy ?? []) {
+      if (stepIds.has(up) && up !== id) {
+        maxUpstream = Math.max(maxUpstream, depthOf(up));
+      }
+    }
+    visiting.delete(id);
+    const layer = maxUpstream + 1;
+    memo.set(id, layer);
+    return layer;
+  };
+
+  for (const step of steps) depthOf(step.stepId);
+  return memo;
+}
+
+function InlinePlanGantt({
+  steps,
+  animated,
+  nowMs,
+  t,
+}: {
+  steps: readonly PlanStepTimeline[];
+  animated: boolean;
+  nowMs: number;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  const layers = useMemo(() => computePlanStepLayers(steps), [steps]);
+  const maxLayer = useMemo(() => Math.max(0, ...layers.values()), [layers]);
+
+  const timeBounds = useMemo(() => {
+    const pts: number[] = [];
+    for (const s of steps) {
+      if (typeof s.createdAtMs === 'number') pts.push(s.createdAtMs);
+      if (typeof s.startedAtMs === 'number') pts.push(s.startedAtMs);
+      if (typeof s.completedAtMs === 'number') pts.push(s.completedAtMs);
+      if (typeof s.updatedAtMs === 'number') pts.push(s.updatedAtMs);
+    }
+    const minTs = pts.length > 0 ? Math.min(...pts) : 0;
+    const rawMaxTs = pts.length > 0 ? Math.max(...pts, animated ? nowMs : 0) : 0;
+    const hasRealSpan = pts.length >= 2 && rawMaxTs - minTs > 500;
+    return {
+      hasRealSpan,
+      minTs,
+      spanMs: Math.max(1000, rawMaxTs - minTs),
+    };
+  }, [steps, animated, nowMs]);
+
+  const rowHeight = 30;
+  const barGeometry = useMemo(() => {
+    const denom = Math.max(1, maxLayer + 1);
+    return steps.map((step, index) => {
+      let leftPct = 0;
+      let widthPct = 18;
+      if (timeBounds.hasRealSpan) {
+        const start = step.startedAtMs ?? step.createdAtMs ?? timeBounds.minTs;
+        const end =
+          step.status === 'completed'
+            ? (step.completedAtMs ?? step.updatedAtMs ?? start + 1000)
+            : step.status === 'in_progress'
+              ? Math.max(start + 1000, animated ? nowMs : (step.updatedAtMs ?? nowMs))
+              : start;
+        leftPct = Math.max(0, Math.min(92, ((start - timeBounds.minTs) / timeBounds.spanMs) * 100));
+        const rawW = ((Math.max(end, start) - start) / timeBounds.spanMs) * 100;
+        widthPct = Math.max(step.status === 'pending' ? 10 : 8, Math.min(100 - leftPct, rawW));
+      } else {
+        const slotCount = Math.max(steps.length, denom);
+        const slotIndex = maxLayer > 0 ? (layers.get(step.stepId) ?? index) : index;
+        leftPct = (slotIndex / slotCount) * 86;
+        widthPct = Math.max(12, Math.min(100 - leftPct, 100 / slotCount));
+      }
+      return {
+        step,
+        index,
+        leftPct,
+        widthPct,
+        centerY: index * rowHeight + rowHeight / 2,
+      };
+    });
+  }, [steps, timeBounds, maxLayer, layers, animated, nowMs]);
+
+  const posById = useMemo(() => {
+    const map = new Map<string, (typeof barGeometry)[number]>();
+    for (const item of barGeometry) map.set(item.step.stepId, item);
+    return map;
+  }, [barGeometry]);
+
+  return (
+    <div className="flex flex-col gap-1.5" data-inline-plan-gantt="true">
+      <div className="flex items-center justify-between text-[11px] text-[var(--msg-tool-card-chevron)]">
+        <span>
+          {timeBounds.hasRealSpan
+            ? safeTranslate(t, 'chat.planPill.ganttTimeAxis', '按实际状态推进时间分布')
+            : safeTranslate(t, 'chat.planPill.ganttStageAxis', '按阶段依赖与顺序推进')}
+        </span>
+        {timeBounds.hasRealSpan && (
+          <span className="font-mono tabular-nums">
+            {formatDuration(timeBounds.spanMs)}
+          </span>
+        )}
+      </div>
+
+      <div className="relative flex flex-col">
+        {barGeometry.map((entry) => {
+          const duration = stepDurationLabel(entry.step, nowMs, animated);
+          return (
+            <div
+              key={entry.step.stepId}
+              className="grid grid-cols-[minmax(110px,38%)_1fr_auto] items-center gap-2"
+              style={{ height: rowHeight }}
+            >
+              <div className="flex min-w-0 items-center gap-1.5">
+                {entry.step.status === 'completed' && (
+                  <CircleCheck size={14} strokeWidth={1.6} className="shrink-0 text-[var(--msg-tool-card-chevron)]" />
+                )}
+                {entry.step.status === 'in_progress' && (
+                  <PlanInProgressIcon animated={animated} variant="inline" />
+                )}
+                {entry.step.status === 'pending' && (
+                  <Circle size={14} strokeWidth={1.5} className="shrink-0 text-[var(--msg-tool-card-text)]" />
+                )}
+                <span
+                  className={cn(
+                    'truncate text-12',
+                    entry.step.status === 'completed'
+                      ? 'text-[var(--msg-tool-card-chevron)]'
+                      : 'text-[var(--msg-tool-card-text)]',
+                  )}
+                  title={entry.step.content}
+                >
+                  {entry.step.content}
+                </span>
+              </div>
+
+              <div className="relative h-4 overflow-hidden rounded bg-[var(--todo-bar-track)]">
+                <div
+                  data-plan-gantt-bar={entry.step.stepId}
+                  className={cn(
+                    'absolute top-[3px] h-[10px] rounded-sm transition-[left,width] duration-[var(--motion-base)]',
+                    entry.step.status === 'completed' && 'bg-[var(--msg-tool-card-chevron)]',
+                    entry.step.status === 'in_progress' && 'bg-[var(--primary)]',
+                    entry.step.status === 'pending' &&
+                      'border border-dashed border-[var(--msg-tool-card-border)] bg-[var(--msg-tool-card-bg)]',
+                  )}
+                  style={{
+                    left: `${entry.leftPct}%`,
+                    width: `${entry.widthPct}%`,
+                  }}
+                />
+              </div>
+
+              <span className="min-w-[36px] text-right font-mono text-[11px] tabular-nums text-[var(--msg-tool-card-chevron)]">
+                {duration ?? (entry.step.blockedBy?.length ? `←${entry.step.blockedBy.join(',')}` : '—')}
+              </span>
+            </div>
+          );
+        })}
+        {posById.size > 0 && (
+          <svg
+            aria-hidden="true"
+            className="pointer-events-none absolute right-[44px] top-0 h-full w-[calc(62%-56px)]"
+            viewBox={`0 0 100 ${Math.max(1, barGeometry.length * rowHeight)}`}
+            preserveAspectRatio="none"
+          >
+            {barGeometry.map((target) =>
+              (target.step.blockedBy ?? []).map((srcId) => {
+                const src = posById.get(srcId);
+                if (!src) return null;
+                const x1 = Math.min(98, src.leftPct + src.widthPct);
+                const x2 = Math.max(2, target.leftPct);
+                const midX = (x1 + x2) / 2;
+                return (
+                  <path
+                    key={`${srcId}->${target.step.stepId}`}
+                    d={`M ${x1} ${src.centerY} C ${midX} ${src.centerY}, ${midX} ${target.centerY}, ${x2} ${target.centerY}`}
+                    fill="none"
+                    stroke="var(--msg-tool-card-chevron)"
+                    strokeWidth="1.2"
+                    strokeDasharray="2 1.5"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                );
+              }),
+            )}
+          </svg>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InlinePlanDag({
+  steps,
+  animated,
+  nowMs,
+  t,
+}: {
+  steps: readonly PlanStepTimeline[];
+  animated: boolean;
+  nowMs: number;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  const hasExplicitEdges = useMemo(
+    () => steps.some((s) => (s.blockedBy?.length ?? 0) > 0),
+    [steps],
+  );
+  const columns = useMemo(() => {
+    const layers = computePlanStepLayers(steps);
+    const grouped = new Map<number, PlanStepTimeline[]>();
+    for (const step of steps) {
+      const layer = layers.get(step.stepId) ?? 0;
+      const bucket = grouped.get(layer) ?? [];
+      bucket.push(step);
+      grouped.set(layer, bucket);
+    }
+    return [...grouped.entries()].sort((a, b) => a[0] - b[0]);
+  }, [steps]);
+
+  const titleById = useMemo(
+    () => new Map(steps.map((s) => [s.stepId, s.content])),
+    [steps],
+  );
+
+  return (
+    <div className="flex flex-col gap-2" data-inline-plan-dag="true">
+      {!hasExplicitEdges && (
+        <div className="text-[11px] text-[var(--msg-tool-card-chevron)]">
+          {safeTranslate(
+            t,
+            'chat.planPill.dagNoExplicitEdges',
+            '未声明前置 blockedBy 依赖，以下步骤处于同级可执行阶段',
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap items-stretch gap-3 overflow-x-auto pb-1">
+        {columns.map(([layer, layerSteps], colIdx) => (
+          <div key={layer} className="flex items-start gap-2">
+            {colIdx > 0 && (
+              <span
+                aria-hidden="true"
+                className="self-center font-mono text-12 text-[var(--msg-tool-card-chevron)]"
+              >
+                →
+              </span>
+            )}
+            <div className="flex min-w-[168px] max-w-[230px] flex-col gap-1.5">
+              <div className="text-[11px] font-medium text-[var(--msg-tool-card-chevron)]">
+                {safeTranslate(t, 'chat.planPill.dagStage', '阶段 {{index}}', { index: layer + 1 })}
+              </div>
+              {layerSteps.map((step) => {
+                const duration = stepDurationLabel(step, nowMs, animated);
+                return (
+                  <div
+                    key={step.stepId}
+                    data-plan-dag-node={step.stepId}
+                    className={cn(
+                      'flex flex-col gap-1 rounded-[8px] border px-2.5 py-2',
+                      step.status === 'in_progress'
+                        ? 'border-[var(--focus-ring)] bg-[var(--msg-tool-card-bg)]'
+                        : 'border-[var(--msg-tool-card-border)] bg-[var(--msg-tool-card-bg)]',
+                    )}
+                  >
+                    <div className="flex items-start gap-1.5">
+                      {step.status === 'completed' && (
+                        <CircleCheck size={14} strokeWidth={1.6} className="mt-0.5 shrink-0 text-[var(--msg-tool-card-chevron)]" />
+                      )}
+                      {step.status === 'in_progress' && (
+                        <PlanInProgressIcon animated={animated} variant="inline" />
+                      )}
+                      {step.status === 'pending' && (
+                        <Circle size={14} strokeWidth={1.5} className="mt-0.5 shrink-0 text-[var(--msg-tool-card-text)]" />
+                      )}
+                      <span
+                        className={cn(
+                          'line-clamp-2 text-12 leading-snug',
+                          step.status === 'completed'
+                            ? 'text-[var(--msg-tool-card-chevron)]'
+                            : 'font-medium text-[var(--msg-tool-card-text)]',
+                        )}
+                      >
+                        {step.content}
+                      </span>
+                    </div>
+                    {(step.blockedBy?.length || step.owner || duration) && (
+                      <div className="flex flex-wrap items-center gap-1 text-[10px] text-[var(--msg-tool-card-chevron)]">
+                        {step.blockedBy && step.blockedBy.length > 0 && (
+                          <span className="inline-flex items-center gap-0.5 rounded border border-[var(--msg-tool-card-border)] px-1 py-0.5">
+                            <Link2 size={10} />
+                            {step.blockedBy
+                              .map((id) => titleById.get(id) ?? `#${id}`)
+                              .join(', ')}
+                          </span>
+                        )}
+                        {step.owner && (
+                          <span className="rounded bg-[var(--todo-bar-track)] px-1 py-0.5">
+                            {step.owner}
+                          </span>
+                        )}
+                        {duration && (
+                          <span className="ml-auto font-mono tabular-nums">{duration}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * 静态灰度进度圆环。
@@ -166,13 +562,43 @@ function PlanInProgressIcon({
  */
 export function InlinePlanCard({
   todos,
+  steps,
+  startedAtMs,
   animated = false,
 }: {
   todos: TodoItem[];
+  steps?: PlanStepTimeline[];
+  startedAtMs?: number;
   /** 只有会话确实在跑时，进行中行才慢转；失败/中断后的历史卡保持静止。 */
   animated?: boolean;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
+  const [viewMode, setViewMode] = useState<InlinePlanViewMode>('list');
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const resolvedSteps = useMemo(
+    () => buildResolvedPlanSteps(todos, steps, startedAtMs),
+    [todos, steps, startedAtMs],
+  );
+  const hasTimedRunningStep = useMemo(
+    () =>
+      animated &&
+      expanded &&
+      resolvedSteps.some(
+        (step) =>
+          step.status === 'in_progress' &&
+          typeof (step.startedAtMs ?? step.createdAtMs) === 'number',
+      ),
+    [animated, expanded, resolvedSteps],
+  );
+
+  useEffect(() => {
+    if (!hasTimedRunningStep) return;
+    setNowMs(Date.now());
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [hasTimedRunningStep]);
 
   if (!todos || todos.length === 0) return null;
 
@@ -181,6 +607,11 @@ export function InlinePlanCard({
   const progress = total > 0 ? (completed / total) * 100 : 0;
   const activeItem = todos.find((todo) => todo.status === 'in_progress');
   const summary = activeItem?.content ?? todos[todos.length - 1]?.content ?? '';
+  const dependencyCount = resolvedSteps.reduce(
+    (sum, step) => sum + (step.blockedBy?.length ?? 0),
+    0,
+  );
+  const stepTitleById = new Map(resolvedSteps.map((s) => [s.stepId, s.content]));
 
   return (
     <div className="flex w-full justify-start" data-inline-plan-card="true">
@@ -190,33 +621,76 @@ export function InlinePlanCard({
           'bg-[var(--msg-tool-card-bg)]',
         )}
       >
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-          className={cn(
-            'flex w-full cursor-pointer select-none items-center gap-2 px-[14px] py-[10px]',
-            'transition-opacity hover:opacity-80',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset',
-            'focus-visible:ring-[var(--focus-ring)]',
+        <div className="flex w-full items-center gap-2 pr-[10px]">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+            className={cn(
+              'flex min-w-0 flex-1 cursor-pointer select-none items-center gap-2 px-[14px] py-[10px]',
+              'transition-opacity hover:opacity-80',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset',
+              'focus-visible:ring-[var(--focus-ring)]',
+            )}
+          >
+            {expanded ? (
+              <ChevronDown size={14} className="shrink-0 text-[var(--msg-tool-card-chevron)]" />
+            ) : (
+              <ChevronRight size={14} className="shrink-0 text-[var(--msg-tool-card-chevron)]" />
+            )}
+            <ListTodo size={16} className="shrink-0 text-[var(--msg-tool-card-text)]" />
+            <span className="shrink-0 font-mono text-13 font-medium leading-none text-[var(--msg-tool-card-text)]">
+              {completed}/{total}
+            </span>
+            {dependencyCount > 0 && (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--msg-tool-card-border)] px-1.5 py-0.5 text-[11px] leading-none text-[var(--msg-tool-card-chevron)]"
+                data-inline-plan-dep-count={dependencyCount}
+              >
+                <GitBranch size={11} />
+                {dependencyCount}
+              </span>
+            )}
+            <span className="shrink-0 text-13 leading-none text-[var(--msg-tool-card-chevron)]">
+              ·
+            </span>
+            <span className="mt-px truncate text-13 leading-none text-[var(--msg-tool-card-text)]">
+              {summary}
+            </span>
+          </button>
+
+          {expanded && (
+            <div
+              role="tablist"
+              aria-label={safeTranslate(t, 'chat.planPill.viewTabs', '计划视图')}
+              className="flex shrink-0 items-center gap-0.5 rounded-[8px] border border-[var(--msg-tool-card-border)] p-0.5"
+            >
+              {(
+                [
+                  ['list', safeTranslate(t, 'chat.planPill.modeList', '清单')],
+                  ['gantt', safeTranslate(t, 'chat.planPill.modeGantt', '时间轴')],
+                  ['dag', safeTranslate(t, 'chat.planPill.modeDag', '依赖图')],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === mode}
+                  onClick={() => setViewMode(mode)}
+                  className={cn(
+                    'cursor-pointer rounded px-2 py-0.5 text-[11px] leading-tight transition-colors',
+                    viewMode === mode
+                      ? 'bg-[var(--todo-bar-track)] font-medium text-[var(--msg-tool-card-text)]'
+                      : 'text-[var(--msg-tool-card-chevron)] hover:text-[var(--msg-tool-card-text)]',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           )}
-        >
-          {expanded ? (
-            <ChevronDown size={14} className="shrink-0 text-[var(--msg-tool-card-chevron)]" />
-          ) : (
-            <ChevronRight size={14} className="shrink-0 text-[var(--msg-tool-card-chevron)]" />
-          )}
-          <ListTodo size={16} className="shrink-0 text-[var(--msg-tool-card-text)]" />
-          <span className="shrink-0 font-mono text-13 font-medium leading-none text-[var(--msg-tool-card-text)]">
-            {completed}/{total}
-          </span>
-          <span className="shrink-0 text-13 leading-none text-[var(--msg-tool-card-chevron)]">
-            ·
-          </span>
-          <span className="mt-px truncate text-13 leading-none text-[var(--msg-tool-card-text)]">
-            {summary}
-          </span>
-        </button>
+        </div>
 
         {!expanded && (
           <div className="h-[2px] w-full bg-[var(--todo-bar-track)]">
@@ -229,44 +703,100 @@ export function InlinePlanCard({
 
         {expanded && (
           <div className="border-t border-[var(--msg-tool-card-border)] px-[14px] pb-[12px] pt-[10px]">
-            <div className="flex flex-col gap-[2px]">
-              {todos.map((todo, index) => (
-                <div
-                  key={`${todo.content}:${index}`}
-                  className="flex min-h-[30px] items-center gap-[10px]"
-                >
-                  {todo.status === 'completed' && (
-                    <CircleCheck
-                      size={18}
-                      strokeWidth={1.5}
-                      className="shrink-0 text-[var(--msg-tool-card-chevron)]"
-                    />
-                  )}
-                  {todo.status === 'in_progress' && (
-                    <PlanInProgressIcon animated={animated} variant="inline" />
-                  )}
-                  {todo.status === 'pending' && (
-                    <Circle
-                      size={18}
-                      strokeWidth={1.5}
-                      className="shrink-0 text-[var(--msg-tool-card-text)]"
-                    />
-                  )}
-                  <span
-                    className={cn(
-                      'min-w-0 break-words text-13 leading-[1.45]',
-                      todo.status === 'completed' &&
-                        'font-normal text-[var(--msg-tool-card-chevron)]',
-                      todo.status === 'in_progress' &&
-                        'font-medium text-[var(--msg-tool-card-text)]',
-                      todo.status === 'pending' && 'font-normal text-[var(--msg-tool-card-text)]',
-                    )}
-                  >
-                    {todo.content}
-                  </span>
-                </div>
-              ))}
-            </div>
+            {viewMode === 'list' && (
+              <div className="flex flex-col gap-[4px]">
+                {resolvedSteps.map((step, index) => {
+                  const duration = stepDurationLabel(step, nowMs, animated);
+                  return (
+                    <div
+                      key={`${step.stepId}:${index}`}
+                      className="flex min-h-[30px] items-start gap-[10px] py-0.5"
+                    >
+                      <div className="mt-[2px] shrink-0">
+                        {step.status === 'completed' && (
+                          <CircleCheck
+                            size={18}
+                            strokeWidth={1.5}
+                            className="shrink-0 text-[var(--msg-tool-card-chevron)]"
+                          />
+                        )}
+                        {step.status === 'in_progress' && (
+                          <PlanInProgressIcon animated={animated} variant="inline" />
+                        )}
+                        {step.status === 'pending' && (
+                          <Circle
+                            size={18}
+                            strokeWidth={1.5}
+                            className="shrink-0 text-[var(--msg-tool-card-text)]"
+                          />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <span
+                            className={cn(
+                              'min-w-0 break-words text-13 leading-[1.45]',
+                              step.status === 'completed' &&
+                                'font-normal text-[var(--msg-tool-card-chevron)]',
+                              step.status === 'in_progress' &&
+                                'font-medium text-[var(--msg-tool-card-text)]',
+                              step.status === 'pending' && 'font-normal text-[var(--msg-tool-card-text)]',
+                            )}
+                          >
+                            {step.content}
+                          </span>
+                          {duration && (
+                            <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[11px] tabular-nums text-[var(--msg-tool-card-chevron)]">
+                              <Clock size={10} />
+                              {duration}
+                            </span>
+                          )}
+                        </div>
+                        {(step.blockedBy?.length || step.owner) && (
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--msg-tool-card-chevron)]">
+                            {step.blockedBy && step.blockedBy.length > 0 && (
+                              <span
+                                data-inline-plan-blocked-by={step.blockedBy.join(',')}
+                                className="inline-flex items-center gap-1 rounded border border-[var(--msg-tool-card-border)] px-1.5 py-0.5"
+                              >
+                                <Link2 size={10} />
+                                {safeTranslate(t, 'chat.planPill.blockedByPrefix', '前置')}:{' '}
+                                {step.blockedBy
+                                  .map((id) => stepTitleById.get(id) ?? `#${id}`)
+                                  .join(', ')}
+                              </span>
+                            )}
+                            {step.owner && (
+                              <span className="rounded bg-[var(--todo-bar-track)] px-1.5 py-0.5">
+                                {step.owner}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {viewMode === 'gantt' && (
+              <InlinePlanGantt
+                steps={resolvedSteps}
+                animated={animated}
+                nowMs={nowMs}
+                t={t as (key: string, options?: Record<string, unknown>) => string}
+              />
+            )}
+
+            {viewMode === 'dag' && (
+              <InlinePlanDag
+                steps={resolvedSteps}
+                animated={animated}
+                nowMs={nowMs}
+                t={t as (key: string, options?: Record<string, unknown>) => string}
+              />
+            )}
           </div>
         )}
       </div>
@@ -280,11 +810,15 @@ export function InlinePlanCard({
 
 export function TodoListCard({
   todos,
+  steps,
+  startedAtMs,
   animated = false,
   maxWidth,
   onDismiss,
 }: {
   todos: TodoItem[];
+  steps?: PlanStepTimeline[];
+  startedAtMs?: number;
   /**
    * 会话是否真的在跑(调用方传 isStreaming)。只有它为真时,in_progress 行才慢转
    * ——计划因停止/失败/中断留在屏幕上时会话已空闲,继续转等于谎报"这步还在
@@ -296,6 +830,11 @@ export function TodoListCard({
   /** Hide the current rendered snapshot without mutating the agent's plan state. */
   onDismiss?: () => void;
 }) {
+  const resolvedFlyoutSteps = useMemo(
+    () => buildResolvedPlanSteps(todos, steps, startedAtMs),
+    [todos, steps, startedAtMs],
+  );
+  const flyoutNowMs = Date.now();
   const { t } = useTranslation();
   const flyoutId = useId();
   const cardRef = useRef<HTMLDivElement>(null);
@@ -461,42 +1000,55 @@ export function TodoListCard({
                   onDismiss ? 'pr-10' : 'pr-[14px]',
                 )}
               >
-                {todos.map((todo, i) => (
-                  <div key={i} className="flex h-[30px] items-center gap-[10px]">
-                    {/* Icon */}
-                    {todo.status === 'completed' && (
-                      <CircleCheck
-                        size={18}
-                        strokeWidth={1.5}
-                        className="shrink-0 text-[var(--msg-tool-card-chevron)]"
-                      />
-                    )}
-                    {todo.status === 'in_progress' && (
-                      <PlanInProgressIcon animated={animated} variant="flyout" />
-                    )}
-                    {todo.status === 'pending' && (
-                      <Circle
-                        size={18}
-                        strokeWidth={1.5}
-                        className="shrink-0 text-[var(--msg-tool-card-text)]"
-                      />
-                    )}
-
-                    {/* Text — 对齐 Codex:completed 置灰,in_progress 高亮,pending 正常。 */}
-                    <span
-                      className={cn(
-                        'mt-px truncate text-13',
-                        todo.status === 'completed' &&
-                          'font-normal text-[var(--msg-tool-card-chevron)]',
-                        todo.status === 'in_progress' &&
-                          'font-semibold text-[var(--msg-tool-card-text)]',
-                        todo.status === 'pending' && 'font-normal text-[var(--msg-tool-card-text)]',
+                {resolvedFlyoutSteps.map((step, i) => {
+                  const duration = stepDurationLabel(step, flyoutNowMs, animated);
+                  return (
+                    <div key={step.stepId ?? i} className="flex min-h-[30px] items-center gap-[10px]">
+                      {/* Icon */}
+                      {step.status === 'completed' && (
+                        <CircleCheck
+                          size={18}
+                          strokeWidth={1.5}
+                          className="shrink-0 text-[var(--msg-tool-card-chevron)]"
+                        />
                       )}
-                    >
-                      {todo.content}
-                    </span>
-                  </div>
-                ))}
+                      {step.status === 'in_progress' && (
+                        <PlanInProgressIcon animated={animated} variant="flyout" />
+                      )}
+                      {step.status === 'pending' && (
+                        <Circle
+                          size={18}
+                          strokeWidth={1.5}
+                          className="shrink-0 text-[var(--msg-tool-card-text)]"
+                        />
+                      )}
+
+                      {/* Text — 对齐 Codex:completed 置灰,in_progress 高亮,pending 正常。 */}
+                      <span
+                        className={cn(
+                          'mt-px min-w-0 flex-1 truncate text-13',
+                          step.status === 'completed' &&
+                            'font-normal text-[var(--msg-tool-card-chevron)]',
+                          step.status === 'in_progress' &&
+                            'font-semibold text-[var(--msg-tool-card-text)]',
+                          step.status === 'pending' && 'font-normal text-[var(--msg-tool-card-text)]',
+                        )}
+                      >
+                        {step.content}
+                      </span>
+                      {step.blockedBy && step.blockedBy.length > 0 && (
+                        <span className="shrink-0 rounded border border-[var(--msg-tool-card-border)] px-1 py-0.5 text-[10px] leading-none text-[var(--msg-tool-card-chevron)]">
+                          ←{step.blockedBy.join(',')}
+                        </span>
+                      )}
+                      {duration && (
+                        <span className="shrink-0 font-mono text-[10px] tabular-nums leading-none text-[var(--msg-tool-card-chevron)]">
+                          {duration}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

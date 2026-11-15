@@ -220,6 +220,8 @@ export function PinnedPlanPanel({
       <TodoListCard
         key={insertion.key}
         todos={insertion.todos}
+        steps={insertion.steps}
+        startedAtMs={insertion.startedAtMs}
         animated={animated}
         maxWidth={width}
         onDismiss={() => setDismissedSnapshotIdentity(snapshotIdentity)}

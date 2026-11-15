@@ -119,6 +119,514 @@ dialog::backdrop { background: var(--overlay-modal, transparent); }
 @media (prefers-reduced-motion: reduce) {
   .group-chevron { transition: none; }
 }
+.taskflow-section {
+  --tf-running: var(--color-info, royalblue);
+  --tf-waiting: var(--color-warning, darkorange);
+  --tf-completed: var(--color-success, forestgreen);
+  --tf-failed: var(--color-danger, crimson);
+  margin-top: 24px;
+  border-top: 1px solid var(--border-default, ButtonBorder);
+  padding-top: 20px;
+}
+.taskflow-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.taskflow-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.taskflow-meta {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: color-mix(in srgb, CanvasText 64%, Canvas);
+}
+.taskflow-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.taskflow-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  background: color-mix(in srgb, CanvasText 3%, Canvas);
+}
+.taskflow-tab,
+.taskflow-pill,
+.taskflow-toggle,
+.taskflow-action-btn,
+.taskflow-dep-chip {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.taskflow-toggle {
+  border-color: color-mix(in srgb, CanvasText 14%, transparent);
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+.taskflow-tab.is-active,
+.taskflow-pill.is-active,
+.taskflow-toggle.is-active {
+  background: color-mix(in srgb, LinkText 15%, Canvas);
+  color: var(--accent-primary, LinkText);
+  border-color: color-mix(in srgb, LinkText 35%, transparent);
+  font-weight: 600;
+}
+.taskflow-controls button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.taskflow-canvas {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.taskflow-gantt {
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 12px;
+  overflow: hidden;
+  background: color-mix(in srgb, CanvasText 2%, Canvas);
+}
+.taskflow-gantt-header {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  align-items: center;
+  height: 32px;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  background: color-mix(in srgb, CanvasText 4%, Canvas);
+  font-size: 11px;
+}
+.taskflow-gantt-labelcol {
+  padding: 0 12px;
+  font-weight: 600;
+  color: color-mix(in srgb, CanvasText 70%, Canvas);
+  border-right: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+.taskflow-gantt-ticks {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+.taskflow-tick,
+.taskflow-now-tag {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  color: color-mix(in srgb, CanvasText 60%, Canvas);
+}
+.taskflow-tick:first-child { transform: translate(4px, -50%); }
+.taskflow-now-tag {
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--tf-failed) 16%, Canvas);
+  color: var(--tf-failed);
+  font-weight: 600;
+}
+.taskflow-gantt-body {
+  position: relative;
+}
+.taskflow-gantt-lanes {
+  position: relative;
+}
+.taskflow-gantt-svg-layer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 210px;
+  right: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.taskflow-svg,
+.taskflow-dag-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.taskflow-dag-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.taskflow-now-line {
+  stroke: var(--tf-failed);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.75;
+}
+.taskflow-edge {
+  fill: none;
+  stroke: color-mix(in srgb, CanvasText 34%, transparent);
+  stroke-width: 1.75;
+  transition: opacity 120ms ease, stroke 120ms ease;
+}
+.taskflow-edge.is-cross {
+  stroke: var(--accent-primary, LinkText);
+  stroke-dasharray: 5 3;
+}
+.taskflow-edge.is-back {
+  stroke-dasharray: 3 3;
+}
+.taskflow-edge.is-active {
+  stroke: var(--accent-primary, LinkText);
+  stroke-width: 2.5;
+  opacity: 1;
+}
+.taskflow-edge.is-dimmed {
+  opacity: 0.16;
+}
+.taskflow-lane-head {
+  height: 26px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  background: color-mix(in srgb, CanvasText 4%, Canvas);
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 8%, transparent);
+}
+.taskflow-lane-count {
+  color: color-mix(in srgb, CanvasText 58%, Canvas);
+  font-weight: 500;
+}
+.taskflow-row {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 7%, transparent);
+}
+.taskflow-row:last-child {
+  border-bottom: 0;
+}
+.taskflow-row-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 12px;
+  border-right: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  cursor: pointer;
+  min-width: 0;
+}
+.taskflow-dot,
+.taskflow-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  background: color-mix(in srgb, CanvasText 40%, Canvas);
+}
+.taskflow-dot[data-status="running"],
+.taskflow-step-dot[data-status="in_progress"] { background: var(--tf-running); }
+.taskflow-dot[data-status="waiting"] { background: var(--tf-waiting); }
+.taskflow-dot[data-status="completed"] { background: var(--tf-completed); }
+.taskflow-dot[data-status="failed"] { background: var(--tf-failed); }
+.taskflow-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.taskflow-row-title {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.taskflow-row-sub {
+  font-size: 11px;
+  color: color-mix(in srgb, CanvasText 58%, Canvas);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.taskflow-row-track {
+  position: relative;
+  min-width: 0;
+  padding: 6px 0;
+}
+.taskflow-bar {
+  position: relative;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  background: color-mix(in srgb, CanvasText 6%, Canvas);
+  color: CanvasText;
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  max-width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+}
+.taskflow-bar[data-status="running"] {
+  background: color-mix(in srgb, var(--tf-running) 15%, Canvas);
+  border-color: color-mix(in srgb, var(--tf-running) 45%, transparent);
+}
+.taskflow-bar[data-status="waiting"] {
+  background: color-mix(in srgb, var(--tf-waiting) 14%, Canvas);
+  border-color: color-mix(in srgb, var(--tf-waiting) 42%, transparent);
+}
+.taskflow-bar[data-status="completed"] {
+  background: color-mix(in srgb, var(--tf-completed) 12%, Canvas);
+  border-color: color-mix(in srgb, var(--tf-completed) 36%, transparent);
+}
+.taskflow-bar[data-status="failed"] {
+  background: color-mix(in srgb, var(--tf-failed) 14%, Canvas);
+  border-color: color-mix(in srgb, var(--tf-failed) 44%, transparent);
+}
+.taskflow-bar-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.taskflow-bar-dur,
+.taskflow-bar-cross {
+  flex-shrink: 0;
+  font-size: 11px;
+  opacity: 0.78;
+}
+.taskflow-bar-cross {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, LinkText 18%, Canvas);
+}
+.taskflow-bar-steps {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+.taskflow-mini-step {
+  position: relative;
+  height: 15px;
+  line-height: 15px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: color-mix(in srgb, CanvasText 5%, Canvas);
+  border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  box-sizing: border-box;
+}
+.taskflow-mini-step[data-status="in_progress"] {
+  border-color: color-mix(in srgb, var(--tf-running) 45%, transparent);
+  background: color-mix(in srgb, var(--tf-running) 10%, Canvas);
+}
+.taskflow-mini-step[data-status="completed"] {
+  border-color: color-mix(in srgb, var(--tf-completed) 35%, transparent);
+  background: color-mix(in srgb, var(--tf-completed) 8%, Canvas);
+}
+.taskflow-dag-scroll {
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, CanvasText 2%, Canvas);
+}
+.taskflow-dag-stage {
+  position: relative;
+}
+.taskflow-dag-node {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  background: Canvas;
+  color: CanvasText;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.taskflow-dag-node.is-selected,
+.taskflow-bar.is-selected,
+.taskflow-row-label.is-selected {
+  outline: 2px solid var(--accent-primary, LinkText);
+  outline-offset: 1px;
+}
+.taskflow-dag-node.is-dimmed,
+.taskflow-bar.is-dimmed,
+.taskflow-row-label.is-dimmed {
+  opacity: 0.28;
+}
+.taskflow-dag-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.taskflow-dag-dur {
+  margin-left: auto;
+  color: color-mix(in srgb, CanvasText 58%, Canvas);
+}
+.taskflow-status-pill,
+.taskflow-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: color-mix(in srgb, CanvasText 8%, Canvas);
+}
+.taskflow-status-pill[data-status="running"] { background: color-mix(in srgb, var(--tf-running) 15%, Canvas); color: var(--tf-running); }
+.taskflow-status-pill[data-status="waiting"] { background: color-mix(in srgb, var(--tf-waiting) 16%, Canvas); color: var(--tf-waiting); }
+.taskflow-status-pill[data-status="completed"] { background: color-mix(in srgb, var(--tf-completed) 15%, Canvas); color: var(--tf-completed); }
+.taskflow-status-pill[data-status="failed"] { background: color-mix(in srgb, var(--tf-failed) 15%, Canvas); color: var(--tf-failed); }
+.taskflow-tag.is-cross { background: color-mix(in srgb, LinkText 15%, Canvas); color: var(--accent-primary, LinkText); }
+.taskflow-dag-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.taskflow-dag-sub {
+  font-size: 11px;
+  color: color-mix(in srgb, CanvasText 60%, Canvas);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.taskflow-dag-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px dashed color-mix(in srgb, CanvasText 12%, transparent);
+}
+.taskflow-dag-step {
+  font-size: 11px;
+  color: color-mix(in srgb, CanvasText 74%, Canvas);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.taskflow-inspector {
+  border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, CanvasText 3%, Canvas);
+}
+.taskflow-inspector-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.taskflow-inspector-titlewrap,
+.taskflow-inspector-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.taskflow-action-btn {
+  border-color: color-mix(in srgb, LinkText 40%, transparent);
+  background: color-mix(in srgb, LinkText 12%, Canvas);
+  color: var(--accent-primary, LinkText);
+  font-weight: 500;
+}
+.taskflow-action-btn.is-subtle {
+  border-color: color-mix(in srgb, CanvasText 16%, transparent);
+  background: transparent;
+  color: inherit;
+}
+.taskflow-inspector-meta {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: color-mix(in srgb, CanvasText 64%, Canvas);
+}
+.taskflow-inspector-deps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+.taskflow-dep-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.taskflow-dep-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: color-mix(in srgb, CanvasText 64%, Canvas);
+}
+.taskflow-dep-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.taskflow-dep-chip {
+  border-color: color-mix(in srgb, CanvasText 16%, transparent);
+  background: Canvas;
+}
+.taskflow-empty-inline {
+  font-size: 12px;
+  color: color-mix(in srgb, CanvasText 50%, Canvas);
+}
+.taskflow-inspector-steps {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+}
+.taskflow-step-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.taskflow-step-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.taskflow-step-item[data-status="completed"] .taskflow-step-dot { background: var(--tf-completed); }
+.taskflow-step-item[data-status="in_progress"] .taskflow-step-dot { background: var(--tf-running); }
+.taskflow-step-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: color-mix(in srgb, CanvasText 58%, Canvas);
+}
 @media (max-width: 720px) {
   .dashboard { padding: 20px 16px 32px; }
   .summary { gap: 16px 0; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -132,4 +640,7 @@ dialog::backdrop { background: var(--overlay-modal, transparent); }
   .folder-children { margin-left: 6px; padding-left: 10px; }
   .section-heading { align-items: flex-start; }
   .detail-heading, .detail-content, .detail-footer { padding: 16px; }
+  .taskflow-gantt-header, .taskflow-row { grid-template-columns: 140px minmax(0, 1fr); }
+  .taskflow-gantt-svg-layer { left: 140px; }
+  .taskflow-inspector-deps { grid-template-columns: 1fr; }
 }

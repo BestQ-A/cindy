@@ -6397,6 +6397,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ): Promise<import('@cindy/maker-shared').TaskTagResult> =>
         ipcRenderer.invoke('local-db:task-tags:execute', request),
     },
+    taskFlow: {
+      snapshot: (
+        opts?: { includeScheduled?: boolean; includeRemote?: boolean; limitSessions?: number },
+      ): Promise<import('../shared/taskFlowGraph').TaskFlowSnapshot> =>
+        ipcRenderer.invoke('local-db:task-flow:snapshot', opts),
+    },
     projectAliases: {
       list: (): Promise<unknown> => ipcRenderer.invoke('local-db:project-aliases:list'),
       set: (input: { projectKey: string; alias: string }): Promise<unknown> =>

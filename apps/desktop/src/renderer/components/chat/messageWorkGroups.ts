@@ -15,7 +15,7 @@ import {
 import type { AgentTaskUpdate, ChatMessage } from '@/hooks/useCCAgentChat';
 import type { GeneratedFileRef } from '@/lib/generatedFiles';
 import type { TurnChangeSetSummary } from '../../../shared/turnChangeSet';
-import type { TodoItem } from './TodoListCard';
+import type { PlanStepTimeline, TodoItem } from './TodoListCard';
 import type { ToolMediaItem } from './AgentActionRow';
 import type { BotStartedTask } from './BotStartedTasks';
 
@@ -24,6 +24,8 @@ type AgentPlanRenderItem = {
   type: 'agent_plan';
   key: string;
   todos: TodoItem[];
+  steps?: PlanStepTimeline[];
+  startedAtMs?: number;
   /** 同一 session 的计划工具行；历史 prepend 改变首行 key 后仍可恢复旧锚点。 */
   sourceClientIds: string[];
   /** 计划调用在流里的位置与时间锚点；原 tool_use 行由本卡取代。 */

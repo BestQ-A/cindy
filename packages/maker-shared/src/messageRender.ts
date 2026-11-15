@@ -128,10 +128,32 @@ export interface MessageRenderOptions {
   renderOrphanTaskUpdates?: boolean;
 }
 
+export interface MessageRenderPlanStepTimeline {
+  /** Stable identifier within the plan session (`taskId` or `step-<n>`). */
+  stepId: string;
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  activeForm?: string;
+  /** Upstream step IDs that block this step. */
+  blockedBy?: string[];
+  /** Downstream step IDs blocked by this step. */
+  blocks?: string[];
+  /** Optional assignee/owner label. */
+  owner?: string;
+  createdAtMs?: number;
+  startedAtMs?: number;
+  completedAtMs?: number;
+  updatedAtMs?: number;
+}
+
 export interface MessageRenderTodoItem {
   content: string;
   status: 'pending' | 'in_progress' | 'completed';
   activeForm?: string;
+  /** Optional upstream blocker IDs (only populated when explicitly declared). */
+  blockedBy?: string[];
+  /** Optional assignee/owner label (only populated when explicitly declared). */
+  owner?: string;
 }
 
 export interface MessageRenderMessageItem<
@@ -165,6 +187,8 @@ export interface MessageRenderTodoCardItem {
   key: string;
   todos: MessageRenderTodoItem[];
   createdAt: string;
+  startedAtMs?: number;
+  steps?: MessageRenderPlanStepTimeline[];
   /** True only while this plan card belongs to the session's active unsettled tail. */
   isStreaming?: boolean;
 }
@@ -246,7 +270,9 @@ export interface MessageRenderTodoInsertion {
   /** 组成同一计划 session 的全部工具行，用于历史 prepend 后恢复旧滚动锚点。 */
   sourceClientIds: string[];
   createdAt?: string;
+  startedAtMs?: number;
   updatedAtMs?: number;
+  steps?: MessageRenderPlanStepTimeline[];
   source: MessageRenderTodoSource;
   /**
    * 这份计划所属的 turn 已被 host 判定为成功收尾(见
@@ -261,6 +287,19 @@ export interface MessageRenderTodoInsertion {
    * `persistCodexPlanOnDone`):在下一个真实 user turn 取代它前,常驻面板不得按
    * "全勾完"兜底退场。
    */
+  turnFailed?: boolean;
+}
+
+export interface ExtractedSessionPlan {
+  key: string;
+  source: MessageRenderTodoSource;
+  steps: MessageRenderPlanStepTimeline[];
+  sourceClientIds: string[];
+  createdAt?: string;
+  startedAtMs?: number;
+  updatedAtMs?: number;
+  sealed?: boolean;
+  sealedAtMs?: number;
   turnFailed?: boolean;
 }
 
@@ -414,6 +453,8 @@ function buildLinearItems<
             key: insertion.key,
             todos: insertion.todos,
             createdAt: message.createdAt,
+            ...(insertion.startedAtMs !== undefined ? { startedAtMs: insertion.startedAtMs } : {}),
+            ...(insertion.steps ? { steps: insertion.steps } : {}),
             isStreaming: false,
           });
         }
@@ -644,15 +685,18 @@ export function findMessageTodoInsertions<TMessage extends MessageRenderSourceMe
   const resultByToolUseId = buildToolResultLookup(messages);
   const sessions: Array<{
     todos: MessageRenderTodoItem[];
+    steps: MessageRenderPlanStepTimeline[];
     sourceClientIds: string[];
     firstIndex: number;
     lastIndex: number;
+    startedAtMs?: number;
     source: MessageRenderTodoSource;
     /** 该 session 首条计划调用之前最近一条 user 消息的下标(turn 边界锚点)。 */
     userBoundaryIndex: number;
   }> = [];
   const lastSessionBySource = new Map<MessageRenderTodoSource, (typeof sessions)[number]>();
   const taskState = new Map<string, MessageRenderTodoItem>();
+  const taskTimelineState = new Map<string, MessageRenderPlanStepTimeline>();
   let lastUserIndex = -1;
 
   for (let index = 0; index < messages.length; index++) {
@@ -700,27 +744,41 @@ export function findMessageTodoInsertions<TMessage extends MessageRenderSourceMe
       || (Boolean(previousAllDone) && !continuesCompletedTaskSession);
     if (source === 'task' && startsNewSession) {
       taskState.clear();
+      taskTimelineState.clear();
     }
 
+    const eventMs = messagePlanEventTimestampMs(message);
+    const prevSteps = !startsNewSession && previous ? previous.steps : [];
+    const parsedSnapshot = extractPlanSnapshotWithMeta(toolNameOf(message), toolInputOf(message));
     const parsed =
-      extractPlanTodos(toolNameOf(message), toolInputOf(message))
+      parsedSnapshot?.todos
       ?? applyTaskPlanTool(
         taskState,
         message,
         resultText,
+        taskTimelineState,
+        eventMs,
       );
     if (!parsed) continue;
 
+    const nextSteps = parsedSnapshot
+      ? reconcileSnapshotStepTimelines(prevSteps, parsedSnapshot.todos, parsedSnapshot.meta, eventMs)
+      : synchronizeStepDependencies([...taskTimelineState.values()].filter((step) => step.content.trim().length > 0));
+
     if (!startsNewSession && previous) {
       previous.todos = parsed;
+      previous.steps = nextSteps;
+      previous.startedAtMs = previous.startedAtMs ?? eventMs;
       previous.sourceClientIds.push(sourceClientId(message));
       previous.lastIndex = index;
     } else {
       const session = {
         todos: parsed,
+        steps: nextSteps,
         sourceClientIds: [sourceClientId(message)],
         firstIndex: index,
         lastIndex: index,
+        startedAtMs: eventMs,
         source,
         userBoundaryIndex: lastUserIndex,
       };
@@ -739,7 +797,9 @@ export function findMessageTodoInsertions<TMessage extends MessageRenderSourceMe
       todos: session.todos,
       sourceClientIds: session.sourceClientIds,
       createdAt: lastRow?.createdAt,
+      ...(session.startedAtMs !== undefined ? { startedAtMs: session.startedAtMs } : {}),
       updatedAtMs: lastRow?.planUpdatedAtMs,
+      ...(session.steps.length > 0 ? { steps: session.steps } : {}),
       source: session.source,
       ...(seal.sealed
         ? {
@@ -751,6 +811,32 @@ export function findMessageTodoInsertions<TMessage extends MessageRenderSourceMe
     });
   }
   return out;
+}
+
+/**
+ * Extract every plan session in chronological order with enriched step
+ * dependencies (`blockedBy`/`blocks`), `owner`, and lifecycle timestamps.
+ */
+export function extractSessionPlanSteps<TMessage extends MessageRenderSourceMessageLike>(
+  messages: readonly TMessage[],
+  options: MessageRenderTodoGroupingOptions = {},
+): ExtractedSessionPlan[] {
+  const plans: ExtractedSessionPlan[] = [];
+  for (const insertion of findMessageTodoInsertions(messages, options).values()) {
+    plans.push({
+      key: insertion.key,
+      source: insertion.source,
+      steps: insertion.steps ?? [],
+      sourceClientIds: insertion.sourceClientIds,
+      createdAt: insertion.createdAt,
+      startedAtMs: insertion.startedAtMs,
+      updatedAtMs: insertion.updatedAtMs,
+      sealed: insertion.sealed,
+      sealedAtMs: insertion.sealedAtMs,
+      turnFailed: insertion.turnFailed,
+    });
+  }
+  return plans;
 }
 
 /**
@@ -1006,12 +1092,70 @@ export function isAgentPlanToolName(toolName: string | undefined): boolean {
   return toolName === 'TodoWrite' || toolName === 'update_plan' || Boolean(toolName && TASK_PLAN_TOOL_NAMES.has(toolName));
 }
 
-export function extractPlanTodos(toolName: string | undefined, toolInput: unknown): MessageRenderTodoItem[] | null {
-  if (toolName === 'TodoWrite') return extractTodos(toolInput);
+interface PlanSnapshotStepMeta {
+  stepId?: string;
+  blockedBy?: string[];
+  blocks?: string[];
+  owner?: string;
+}
+
+interface PlanSnapshotWithMeta {
+  todos: MessageRenderTodoItem[];
+  meta: PlanSnapshotStepMeta[];
+}
+
+function parseTodoRecordEntry(
+  item: unknown,
+  { allowFallbackKeys = false }: { allowFallbackKeys?: boolean } = {},
+): { todo: MessageRenderTodoItem; meta: PlanSnapshotStepMeta } | null {
+  const record = readRecord(item);
+  if (!record) return null;
+  const rawContent = allowFallbackKeys
+    ? (record.content ?? record.text ?? record.step ?? record.title)
+    : record.content;
+  const content = typeof rawContent === 'string'
+    ? (allowFallbackKeys ? rawContent.trim() : rawContent)
+    : String(rawContent ?? '');
+  if (allowFallbackKeys && !content.trim()) return null;
+
+  const blockedBy = parseDependencyIdList(
+    record.blockedBy ?? record.blocked_by ?? record.dependsOn ?? record.depends_on,
+  );
+  const blocks = parseDependencyIdList(record.blocks ?? record.blocking);
+  const owner = firstString(record, ['owner', 'assignee', 'agent']);
+  const stepId = firstString(record, ['stepId', 'step_id', 'taskId', 'task_id', 'id']);
+
+  const todo: MessageRenderTodoItem = {
+    content,
+    status: normalizeTodoStatus(record.status) ?? 'pending',
+    ...(allowFallbackKeys
+      ? {}
+      : { activeForm: typeof record.activeForm === 'string' ? record.activeForm : undefined }),
+    ...(blockedBy ? { blockedBy } : {}),
+    ...(owner ? { owner } : {}),
+  };
+  return {
+    todo,
+    meta: {
+      ...(stepId ? { stepId } : {}),
+      ...(blockedBy ? { blockedBy } : {}),
+      ...(blocks ? { blocks } : {}),
+      ...(owner ? { owner } : {}),
+    },
+  };
+}
+
+function extractPlanSnapshotWithMeta(
+  toolName: string | undefined,
+  toolInput: unknown,
+): PlanSnapshotWithMeta | null {
+  if (toolName === 'TodoWrite') return extractTodosWithMeta(toolInput);
   if (toolName !== 'update_plan') return null;
 
   const input = readRecord(toolInput);
-  const structured = extractStructuredPlanItems(input?.items) ?? extractStructuredPlanItems(input?.plan);
+  const structured =
+    extractStructuredPlanItemsWithMeta(input?.items)
+    ?? extractStructuredPlanItemsWithMeta(input?.plan);
   if (structured) return structured;
 
   const text = typeof input?.text === 'string' ? input.text : '';
@@ -1023,29 +1167,38 @@ export function extractPlanTodos(toolName: string | undefined, toolInput: unknow
     .filter(Boolean);
 
   if (items.length === 0) return null;
-  return items.map((content, index) => ({
+  const todos: MessageRenderTodoItem[] = items.map((content, index) => ({
     content,
     status: index === 0 ? 'in_progress' : 'pending',
   }));
+  return {
+    todos,
+    meta: todos.map(() => ({})),
+  };
 }
 
-export function extractTodos(toolInput: unknown): MessageRenderTodoItem[] | null {
+export function extractPlanTodos(toolName: string | undefined, toolInput: unknown): MessageRenderTodoItem[] | null {
+  return extractPlanSnapshotWithMeta(toolName, toolInput)?.todos ?? null;
+}
+
+function extractTodosWithMeta(toolInput: unknown): PlanSnapshotWithMeta | null {
   const input = readRecord(toolInput);
   const todos = input?.todos;
   if (!Array.isArray(todos) || todos.length === 0) return null;
 
-  const out = todos
-    .map((item): MessageRenderTodoItem | null => {
-      const record = readRecord(item);
-      if (!record) return null;
-      return {
-        content: typeof record.content === 'string' ? record.content : String(record.content ?? ''),
-        status: normalizeTodoStatus(record.status) ?? 'pending',
-        activeForm: typeof record.activeForm === 'string' ? record.activeForm : undefined,
-      };
-    })
-    .filter((item): item is MessageRenderTodoItem => item !== null);
-  return out.length > 0 ? out : null;
+  const outTodos: MessageRenderTodoItem[] = [];
+  const outMeta: PlanSnapshotStepMeta[] = [];
+  for (const item of todos) {
+    const parsed = parseTodoRecordEntry(item);
+    if (!parsed) continue;
+    outTodos.push(parsed.todo);
+    outMeta.push(parsed.meta);
+  }
+  return outTodos.length > 0 ? { todos: outTodos, meta: outMeta } : null;
+}
+
+export function extractTodos(toolInput: unknown): MessageRenderTodoItem[] | null {
+  return extractTodosWithMeta(toolInput)?.todos ?? null;
 }
 
 function isExplicitPlanClearEvent(message: MessageRenderSourceMessageLike): boolean {
@@ -1317,22 +1470,17 @@ function taskToolTargetsExistingTask(
   return Boolean(id && taskState.has(id));
 }
 
-function extractStructuredPlanItems(items: unknown): MessageRenderTodoItem[] | null {
+function extractStructuredPlanItemsWithMeta(items: unknown): PlanSnapshotWithMeta | null {
   if (!Array.isArray(items) || items.length === 0) return null;
-  const todos = items
-    .map((item): MessageRenderTodoItem | null => {
-      const record = readRecord(item);
-      if (!record) return null;
-      const rawContent = record.content ?? record.text ?? record.step ?? record.title;
-      const content = typeof rawContent === 'string' ? rawContent.trim() : String(rawContent ?? '').trim();
-      if (!content) return null;
-      return {
-        content,
-        status: normalizeTodoStatus(record.status) ?? 'pending',
-      };
-    })
-    .filter((item): item is MessageRenderTodoItem => item !== null);
-  return todos.length > 0 ? todos : null;
+  const todos: MessageRenderTodoItem[] = [];
+  const meta: PlanSnapshotStepMeta[] = [];
+  for (const item of items) {
+    const parsed = parseTodoRecordEntry(item, { allowFallbackKeys: true });
+    if (!parsed) continue;
+    todos.push(parsed.todo);
+    meta.push(parsed.meta);
+  }
+  return todos.length > 0 ? { todos, meta } : null;
 }
 
 function normalizePlanLine(line: string): string {
@@ -1342,10 +1490,270 @@ function normalizePlanLine(line: string): string {
     .trim();
 }
 
+function messagePlanEventTimestampMs(message: MessageRenderSourceMessageLike): number | undefined {
+  const createdMs = parseTimestampMs(message.createdAt);
+  if (createdMs !== null) return createdMs;
+  if (typeof message.planUpdatedAtMs === 'number' && Number.isFinite(message.planUpdatedAtMs)) {
+    return message.planUpdatedAtMs;
+  }
+  return undefined;
+}
+
+function normalizeStepRefId(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('#') && trimmed.length > 1) return trimmed.slice(1).trim();
+  return trimmed;
+}
+
+function parseDependencyIdList(value: unknown): string[] | undefined {
+  const rawItems: string[] = [];
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (typeof entry === 'string') {
+        const cleaned = normalizeStepRefId(entry);
+        if (cleaned) rawItems.push(cleaned);
+      } else if (typeof entry === 'number' && Number.isFinite(entry)) {
+        rawItems.push(String(entry));
+      }
+    }
+  } else if (typeof value === 'string' && value.trim().length > 0) {
+    for (const part of value.split(',')) {
+      const cleaned = normalizeStepRefId(part);
+      if (cleaned) rawItems.push(cleaned);
+    }
+  }
+  const deduped = [...new Set(rawItems)];
+  return deduped.length > 0 ? deduped : undefined;
+}
+
+function mergeDependencyLists(
+  current: readonly string[] | undefined,
+  replacement: readonly string[] | undefined,
+  additions: readonly string[] | undefined,
+  removals: readonly string[] | undefined,
+): string[] | undefined {
+  let list = replacement !== undefined ? [...replacement] : [...(current ?? [])];
+  if (additions && additions.length > 0) {
+    for (const id of additions) {
+      if (!list.includes(id)) list.push(id);
+    }
+  }
+  if (removals && removals.length > 0) {
+    const drop = new Set(removals);
+    list = list.filter((id) => !drop.has(id));
+  }
+  const deduped = [...new Set(list)];
+  return deduped.length > 0 ? deduped : undefined;
+}
+
+function computeStepTimelineTimestamps(
+  prev: MessageRenderPlanStepTimeline | undefined,
+  status: MessageRenderTodoItem['status'],
+  content: string,
+  eventMs: number | undefined,
+): { createdAtMs?: number; startedAtMs?: number; completedAtMs?: number; updatedAtMs?: number } {
+  const createdAtMs = prev?.createdAtMs ?? eventMs;
+  let startedAtMs = prev?.startedAtMs;
+  if (startedAtMs === undefined) {
+    if (status === 'in_progress') {
+      startedAtMs = eventMs ?? createdAtMs;
+    } else if (status === 'completed') {
+      startedAtMs = prev?.createdAtMs ?? eventMs ?? createdAtMs;
+    }
+  }
+  let completedAtMs: number | undefined;
+  if (status === 'completed') {
+    completedAtMs = prev?.status === 'completed'
+      ? (prev.completedAtMs ?? eventMs ?? startedAtMs ?? createdAtMs)
+      : (eventMs ?? prev?.completedAtMs ?? startedAtMs ?? createdAtMs);
+  }
+  const changed = !prev || prev.status !== status || prev.content !== content;
+  const updatedAtMs = changed ? (eventMs ?? prev?.updatedAtMs) : (prev?.updatedAtMs ?? eventMs);
+  return {
+    ...(createdAtMs !== undefined ? { createdAtMs } : {}),
+    ...(startedAtMs !== undefined ? { startedAtMs } : {}),
+    ...(completedAtMs !== undefined ? { completedAtMs } : {}),
+    ...(updatedAtMs !== undefined ? { updatedAtMs } : {}),
+  };
+}
+
+function synchronizeStepDependencies(
+  steps: readonly MessageRenderPlanStepTimeline[],
+): MessageRenderPlanStepTimeline[] {
+  if (steps.length === 0) return [];
+  const byId = new Map<string, MessageRenderPlanStepTimeline>();
+  const cloned = steps.map((step) => {
+    const copy: MessageRenderPlanStepTimeline = {
+      ...step,
+      ...(step.blockedBy && step.blockedBy.length > 0 ? { blockedBy: [...new Set(step.blockedBy)] } : {}),
+      ...(step.blocks && step.blocks.length > 0 ? { blocks: [...new Set(step.blocks)] } : {}),
+    };
+    if (!copy.blockedBy || copy.blockedBy.length === 0) delete copy.blockedBy;
+    if (!copy.blocks || copy.blocks.length === 0) delete copy.blocks;
+    byId.set(copy.stepId, copy);
+    return copy;
+  });
+
+  for (const step of cloned) {
+    if (step.blockedBy) {
+      for (const upstreamId of step.blockedBy) {
+        const upstream = byId.get(upstreamId);
+        if (upstream && upstreamId !== step.stepId) {
+          const nextBlocks = upstream.blocks ? [...upstream.blocks] : [];
+          if (!nextBlocks.includes(step.stepId)) nextBlocks.push(step.stepId);
+          upstream.blocks = nextBlocks;
+        }
+      }
+    }
+    if (step.blocks) {
+      for (const downstreamId of step.blocks) {
+        const downstream = byId.get(downstreamId);
+        if (downstream && downstreamId !== step.stepId) {
+          const nextBlockedBy = downstream.blockedBy ? [...downstream.blockedBy] : [];
+          if (!nextBlockedBy.includes(step.stepId)) nextBlockedBy.push(step.stepId);
+          downstream.blockedBy = nextBlockedBy;
+        }
+      }
+    }
+  }
+  return cloned;
+}
+
+function reconcileSnapshotStepTimelines(
+  prevSteps: readonly MessageRenderPlanStepTimeline[],
+  todos: readonly MessageRenderTodoItem[],
+  meta: readonly PlanSnapshotStepMeta[],
+  eventMs: number | undefined,
+): MessageRenderPlanStepTimeline[] {
+  const prevById = new Map<string, MessageRenderPlanStepTimeline>();
+  const prevByContent = new Map<string, MessageRenderPlanStepTimeline[]>();
+  const usedPrevIds = new Set<string>();
+  for (const prev of prevSteps) {
+    prevById.set(prev.stepId, prev);
+    const key = prev.content.trim();
+    const list = prevByContent.get(key) ?? [];
+    list.push(prev);
+    prevByContent.set(key, list);
+  }
+  const usedIds = new Set<string>();
+  let nextAutoIndex = prevSteps.length + 1;
+
+  const steps = todos.map((todo, index): MessageRenderPlanStepTimeline => {
+    const entryMeta = meta[index] ?? {};
+    let prev = entryMeta.stepId ? prevById.get(entryMeta.stepId) : undefined;
+    if (!prev) {
+      const candidates = prevByContent.get(todo.content.trim()) ?? [];
+      prev = candidates.find((candidate) => !usedPrevIds.has(candidate.stepId));
+    }
+    if (prev) usedPrevIds.add(prev.stepId);
+
+    let stepId = entryMeta.stepId ?? prev?.stepId ?? `step-${index + 1}`;
+    while (usedIds.has(stepId)) {
+      stepId = `step-${nextAutoIndex++}`;
+    }
+    usedIds.add(stepId);
+
+    const blockedBy = entryMeta.blockedBy ?? prev?.blockedBy;
+    const blocks = entryMeta.blocks ?? prev?.blocks;
+    const owner = entryMeta.owner ?? prev?.owner;
+    const timestamps = computeStepTimelineTimestamps(prev, todo.status, todo.content, eventMs);
+
+    return {
+      stepId,
+      content: todo.content,
+      status: todo.status,
+      ...(todo.activeForm ? { activeForm: todo.activeForm } : {}),
+      ...(blockedBy && blockedBy.length > 0 ? { blockedBy } : {}),
+      ...(blocks && blocks.length > 0 ? { blocks } : {}),
+      ...(owner ? { owner } : {}),
+      ...timestamps,
+    };
+  });
+
+  return synchronizeStepDependencies(steps);
+}
+
+function upsertTaskStepTimeline(
+  taskState: Map<string, MessageRenderTodoItem>,
+  taskTimelineState: Map<string, MessageRenderPlanStepTimeline> | undefined,
+  id: string,
+  {
+    content,
+    status,
+    blockedBy,
+    blocks,
+    owner,
+    eventMs,
+  }: {
+    content: string;
+    status: MessageRenderTodoItem['status'];
+    blockedBy?: string[];
+    blocks?: string[];
+    owner?: string;
+    eventMs?: number;
+  },
+): void {
+  const todo: MessageRenderTodoItem = {
+    content,
+    status,
+    ...(blockedBy && blockedBy.length > 0 ? { blockedBy } : {}),
+    ...(owner ? { owner } : {}),
+  };
+  taskState.set(id, todo);
+  if (!taskTimelineState) return;
+  const prev = taskTimelineState.get(id);
+  const timestamps = computeStepTimelineTimestamps(prev, status, content, eventMs);
+  taskTimelineState.set(id, {
+    stepId: id,
+    content,
+    status,
+    ...(blockedBy && blockedBy.length > 0 ? { blockedBy } : {}),
+    ...(blocks && blocks.length > 0 ? { blocks } : {}),
+    ...(owner ? { owner } : {}),
+    ...timestamps,
+  });
+}
+
+function deleteTaskStepAndReferences(
+  taskState: Map<string, MessageRenderTodoItem>,
+  taskTimelineState: Map<string, MessageRenderPlanStepTimeline> | undefined,
+  id: string,
+): void {
+  taskState.delete(id);
+  for (const [otherId, todo] of taskState) {
+    if (todo.blockedBy?.includes(id)) {
+      const next = todo.blockedBy.filter((ref) => ref !== id);
+      if (next.length > 0) {
+        taskState.set(otherId, { ...todo, blockedBy: next });
+      } else {
+        const copy = { ...todo };
+        delete copy.blockedBy;
+        taskState.set(otherId, copy);
+      }
+    }
+  }
+  if (!taskTimelineState) return;
+  taskTimelineState.delete(id);
+  for (const [otherId, step] of taskTimelineState) {
+    const nextBlockedBy = step.blockedBy?.filter((ref) => ref !== id);
+    const nextBlocks = step.blocks?.filter((ref) => ref !== id);
+    if (nextBlockedBy?.length !== step.blockedBy?.length || nextBlocks?.length !== step.blocks?.length) {
+      const updated: MessageRenderPlanStepTimeline = { ...step };
+      if (nextBlockedBy && nextBlockedBy.length > 0) updated.blockedBy = nextBlockedBy;
+      else delete updated.blockedBy;
+      if (nextBlocks && nextBlocks.length > 0) updated.blocks = nextBlocks;
+      else delete updated.blocks;
+      taskTimelineState.set(otherId, updated);
+    }
+  }
+}
+
 function applyTaskPlanTool(
   taskState: Map<string, MessageRenderTodoItem>,
   message: MessageRenderSourceMessageLike,
   resultText: string | undefined,
+  taskTimelineState?: Map<string, MessageRenderPlanStepTimeline>,
+  eventMs?: number,
 ): MessageRenderTodoItem[] | null {
   const toolName = toolNameOf(message);
   if (!TASK_PLAN_TOOL_NAMES.has(toolName)) return null;
@@ -1356,23 +1764,47 @@ function applyTaskPlanTool(
     if (resultTasks.length === 0) {
       if (taskListResultClearsPlan(resultText)) {
         taskState.clear();
+        taskTimelineState?.clear();
         return null;
       }
       return currentTaskTodos(taskState);
     }
     const previousTaskState = new Map(taskState);
+    const previousTimelineState = taskTimelineState ? new Map(taskTimelineState) : undefined;
     taskState.clear();
+    taskTimelineState?.clear();
     for (const task of resultTasks) {
       const id = taskId(task);
       if (!id) continue;
       const status = normalizeTaskStatus(task.status) ?? 'pending';
       if (status === 'deleted') continue;
-      const content = taskContent(task) ?? previousTaskState.get(id)?.content;
+      const prevTodo = previousTaskState.get(id);
+      const prevStep = previousTimelineState?.get(id);
+      const content = taskContent(task) ?? prevTodo?.content;
       if (!content) continue;
+      const blockedBy =
+        parseDependencyIdList(task.blockedBy ?? task.blocked_by) ?? prevStep?.blockedBy ?? prevTodo?.blockedBy;
+      const blocks = parseDependencyIdList(task.blocks ?? task.blocking) ?? prevStep?.blocks;
+      const owner = firstString(task, ['owner', 'assignee']) ?? prevStep?.owner ?? prevTodo?.owner;
+      const prevBacked = prevStep ?? (prevTodo ? { stepId: id, content: prevTodo.content, status: prevTodo.status } : undefined);
+      const timestamps = computeStepTimelineTimestamps(prevBacked, status, content, eventMs);
       taskState.set(id, {
         content,
         status,
+        ...(blockedBy ? { blockedBy } : {}),
+        ...(owner ? { owner } : {}),
       });
+      if (taskTimelineState) {
+        taskTimelineState.set(id, {
+          stepId: id,
+          content,
+          status,
+          ...(blockedBy ? { blockedBy } : {}),
+          ...(blocks ? { blocks } : {}),
+          ...(owner ? { owner } : {}),
+          ...timestamps,
+        });
+      }
     }
     return currentTaskTodos(taskState);
   }
@@ -1383,9 +1815,18 @@ function applyTaskPlanTool(
     const status = normalizeTaskStatus(resultTask?.status);
     const content = taskContent(input) ?? taskContent(resultTask);
     if (!content) return currentTaskTodos(taskState);
-    taskState.set(id, {
+    const blockedBy = parseDependencyIdList(
+      input.blockedBy ?? input.blocked_by ?? input.dependsOn ?? input.depends_on ?? resultTask?.blockedBy ?? resultTask?.blocked_by,
+    );
+    const blocks = parseDependencyIdList(input.blocks ?? resultTask?.blocks);
+    const owner = firstString(input, ['owner', 'assignee']) ?? firstString(resultTask, ['owner', 'assignee']);
+    upsertTaskStepTimeline(taskState, taskTimelineState, id, {
       content,
       status: status && status !== 'deleted' ? status : 'pending',
+      blockedBy,
+      blocks,
+      owner,
+      eventMs,
     });
     return currentTaskTodos(taskState);
   }
@@ -1399,19 +1840,27 @@ function applyTaskPlanTool(
   // event look resolved and stop backfill early, producing a partial plan such
   // as "Step 1 / 1" for what was actually the fourth task.
   const existing = taskState.get(id);
+  const existingTimeline = taskTimelineState?.get(id);
   const suppliedContent = taskContent(input) ?? taskContent(resultTask);
   if (!existing && !suppliedContent) return null;
 
   if (toolName === 'TaskGet' && resultTask) {
     const status = normalizeTaskStatus(resultTask.status) ?? taskState.get(id)?.status ?? 'pending';
     if (status === 'deleted') {
-      taskState.delete(id);
+      deleteTaskStepAndReferences(taskState, taskTimelineState, id);
     } else {
       const content = taskContent(resultTask) ?? existing?.content;
       if (!content) return currentTaskTodos(taskState);
-      taskState.set(id, {
+      const blockedBy = parseDependencyIdList(resultTask.blockedBy ?? resultTask.blocked_by) ?? existingTimeline?.blockedBy ?? existing?.blockedBy;
+      const blocks = parseDependencyIdList(resultTask.blocks ?? resultTask.blocking) ?? existingTimeline?.blocks;
+      const owner = firstString(resultTask, ['owner', 'assignee']) ?? existingTimeline?.owner ?? existing?.owner;
+      upsertTaskStepTimeline(taskState, taskTimelineState, id, {
         content,
         status,
+        blockedBy,
+        blocks,
+        owner,
+        eventMs,
       });
     }
     return currentTaskTodos(taskState);
@@ -1419,14 +1868,37 @@ function applyTaskPlanTool(
 
   const status = normalizeTaskStatus(input.status ?? resultTask?.status) ?? existing?.status ?? 'pending';
   if (status === 'deleted') {
-    taskState.delete(id);
+    deleteTaskStepAndReferences(taskState, taskTimelineState, id);
     return currentTaskTodos(taskState);
   }
   const content = suppliedContent ?? existing?.content;
   if (!content) return currentTaskTodos(taskState);
-  taskState.set(id, {
+
+  const blockedBy = mergeDependencyLists(
+    existingTimeline?.blockedBy ?? existing?.blockedBy,
+    parseDependencyIdList(input.blockedBy ?? input.blocked_by ?? resultTask?.blockedBy ?? resultTask?.blocked_by),
+    parseDependencyIdList(input.addBlockedBy ?? input.add_blocked_by),
+    parseDependencyIdList(input.removeBlockedBy ?? input.remove_blocked_by),
+  );
+  const blocks = mergeDependencyLists(
+    existingTimeline?.blocks,
+    parseDependencyIdList(input.blocks ?? resultTask?.blocks),
+    parseDependencyIdList(input.addBlocks ?? input.add_blocks),
+    parseDependencyIdList(input.removeBlocks ?? input.remove_blocks),
+  );
+  const owner =
+    firstString(input, ['owner', 'assignee'])
+    ?? firstString(resultTask, ['owner', 'assignee'])
+    ?? existingTimeline?.owner
+    ?? existing?.owner;
+
+  upsertTaskStepTimeline(taskState, taskTimelineState, id, {
     content,
     status,
+    blockedBy,
+    blocks,
+    owner,
+    eventMs,
   });
   return currentTaskTodos(taskState);
 }
@@ -1516,11 +1988,41 @@ function parsePlainTaskSnapshotLine(line: string): Record<string, unknown> | nul
   if (statusEnd <= 1) return null;
   const status = rest.slice(1, statusEnd).trim();
   let subject = rest.slice(statusEnd + 1).trim();
-  const trailingMetaStart = subject.lastIndexOf(' [');
-  if (trailingMetaStart > 0 && subject.endsWith(']')) {
+  let blockedBy: string[] | undefined;
+  let blocks: string[] | undefined;
+  let owner: string | undefined;
+
+  while (subject.endsWith(']')) {
+    const trailingMetaStart = subject.lastIndexOf(' [');
+    if (trailingMetaStart <= 0) break;
+    const tag = subject.slice(trailingMetaStart + 2, -1).trim();
     subject = subject.slice(0, trailingMetaStart).trim();
+    const lowerTag = tag.toLowerCase();
+    if (lowerTag.startsWith('blocked by:') || lowerTag.startsWith('blocked by ')) {
+      const raw = tag.replace(/^blocked\s+by\s*:?\s*/i, '');
+      blockedBy = parseDependencyIdList(raw) ?? blockedBy;
+    } else if (lowerTag.startsWith('blockedby:') || lowerTag.startsWith('blockedby ')) {
+      const raw = tag.replace(/^blockedby\s*:?\s*/i, '');
+      blockedBy = parseDependencyIdList(raw) ?? blockedBy;
+    } else if (lowerTag.startsWith('blocks:') || lowerTag.startsWith('blocks ')) {
+      const raw = tag.replace(/^blocks\s*:?\s*/i, '');
+      blocks = parseDependencyIdList(raw) ?? blocks;
+    } else if (lowerTag.startsWith('owner:') || lowerTag.startsWith('owner ')) {
+      const raw = tag.replace(/^owner\s*:?\s*/i, '').trim();
+      if (raw) owner = raw;
+    } else {
+      break;
+    }
   }
-  return subject ? { id, status, subject } : null;
+  if (!subject) return null;
+  return {
+    id,
+    status,
+    subject,
+    ...(blockedBy ? { blockedBy } : {}),
+    ...(blocks ? { blocks } : {}),
+    ...(owner ? { owner } : {}),
+  };
 }
 
 function firstWhitespaceIndex(value: string): number {

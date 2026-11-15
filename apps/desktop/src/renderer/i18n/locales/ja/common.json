@@ -10307,7 +10307,14 @@
       "back": "戻る",
       "progressSummary": "{{done}}/{{total}} Agent",
       "tokens": "{{value}} tokens",
-      "noProgress": "進行状況の詳細はまだありません"
+      "noProgress": "進行状況の詳細はまだありません",
+      "viewSwitcher": "バックグラウンドタスクビュー切替",
+      "viewList": "一覧",
+      "viewTimeline": "タイムラインと依存",
+      "timelineWindow": "時間幅",
+      "planStepsSection": "現在の計画依存ステップ",
+      "executionTimeline": "実行タイムライン",
+      "untitledTask": "バックグラウンドタスク"
     },
     "resourceUsage": {
       "sections": {
@@ -10521,7 +10528,8 @@
         "automations": "自動化",
         "plugins": "プラグイン",
         "bots": "仲間",
-        "search": "検索"
+        "search": "検索",
+        "taskFlow": "タスク脈絡"
       }
     },
     "user": {
@@ -13549,7 +13557,16 @@
     },
     "planPill": {
       "step": "ステップ {{current}} / {{total}}",
-      "dismiss": "計画を閉じる"
+      "dismiss": "計画を閉じる",
+      "viewTabs": "計画ビュー切替",
+      "modeList": "リスト",
+      "modeGantt": "タイムライン",
+      "modeDag": "依存関係図",
+      "ganttTimeAxis": "実時間経過による進捗",
+      "ganttStageAxis": "ステップ依存順に表示",
+      "dagNoExplicitEdges": "明示的な blockedBy 依存はありません。以下のステップは並列実行可能です。",
+      "dagStage": "ステージ {{index}}",
+      "blockedByPrefix": "前提"
     },
     "forkOrigin": {
       "label": "元のセッションから作成"
@@ -14815,7 +14832,8 @@
       "backToAutomations": "Automations に戻る",
       "backToReviewSource": "元のタスクに戻る",
       "waitForReply": "ドキュメント領域での返信を待っています…",
-      "modelSwitchedFastModeOff": "モデルを切り替えました。Fast Mode は無効になりました"
+      "modelSwitchedFastModeOff": "モデルを切り替えました。Fast Mode は無効になりました",
+      "taskFlow": "タスク脈絡"
     },
     "remoteDesktopConfirmation": {
       "title": "リモートのパソコンで確認が必要です",
@@ -20410,6 +20428,94 @@
     },
     "switchOffer": {
       "action": "{{model}} に切り替えて続行"
+    }
+  },
+  "taskFlow": {
+    "title": "タスク脈絡",
+    "subtitle": "コンパニオン・端末間セッション・タスク手順の依存関係と時間推移を俯瞰します",
+    "viewSwitcher": "タスク脈絡ビュー切替",
+    "refresh": "更新",
+    "searchPlaceholder": "タスク、コンパニオン、PC、フォルダを検索…",
+    "filterStatusLabel": "ステータスで絞り込み",
+    "localDevice": "ローカル PC",
+    "empty": "現在の条件に一致するタスクはありません。",
+    "views": {
+      "gantt": "ガントタイムライン",
+      "dag": "依存関係 DAG"
+    },
+    "kpi": {
+      "totalNodes": "総ノード数",
+      "runningNodes": "実行中",
+      "totalEdges": "依存・連携数",
+      "crossDeviceEdges": "PC 間連携"
+    },
+    "statusFilter": {
+      "all": "すべて"
+    },
+    "toggles": {
+      "expandSteps": "内部ステップを展開",
+      "onlyDependencies": "依存チェーンのみ",
+      "includeScheduled": "定時タスクを含む ({{count}})"
+    },
+    "groupBy": {
+      "label": "スイムレーン",
+      "hierarchy": "階層別",
+      "computer": "PC 別",
+      "chain": "チェーン別"
+    },
+    "window": {
+      "label": "期間",
+      "1h": "1時間",
+      "6h": "6時間",
+      "24h": "24時間",
+      "7d": "7日",
+      "all": "すべて"
+    },
+    "columns": {
+      "taskItem": "タスク / コンパニオン",
+      "count": "{{count}} 件"
+    },
+    "status": {
+      "running": "実行中",
+      "waiting": "待機中",
+      "completed": "完了",
+      "failed": "失敗",
+      "paused": "一時停止",
+      "idle": "待機"
+    },
+    "nodeKind": {
+      "companion": "コンパニオン",
+      "session": "セッション",
+      "subagent": "サブエージェント",
+      "orca_worker": "チームワーカー",
+      "group_step": "グループ手順",
+      "plan_step": "計画ステップ"
+    },
+    "edgeKind": {
+      "created_task": "タスク作成",
+      "delegated": "委任",
+      "forked": "分岐",
+      "handoff": "引き継ぎ",
+      "reported": "完了報告",
+      "orca_dispatch": "チーム配信",
+      "subagent_spawn": "サブエージェント起動",
+      "blocked_by": "前提依存"
+    },
+    "inspector": {
+      "title": "タスクノード詳細",
+      "close": "詳細を閉じる",
+      "openSession": "Cindy で開く",
+      "computer": "実行 PC",
+      "folder": "フォルダ",
+      "createdAt": "作成時刻",
+      "startedAt": "開始時刻",
+      "completedAt": "完了時刻",
+      "elapsed": "経過時間",
+      "upstream": "上流依存 ({{count}})",
+      "noUpstream": "上流依存なし",
+      "downstream": "下流タスク ({{count}})",
+      "noDownstream": "下流タスクなし",
+      "internalSteps": "内部計画ステップ ({{count}})"
     }
   }
 }

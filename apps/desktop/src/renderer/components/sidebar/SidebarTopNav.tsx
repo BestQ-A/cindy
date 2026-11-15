@@ -124,6 +124,7 @@ function useSidebarNavigationActions(
   const navigate = useNavigate();
   const { activeKey, navigateToView } = useActiveMainView();
   const onScheduleMatch = useMatch('/cc-agent/scheduled');
+  const onTaskFlowMatch = useMatch('/cc-agent/task-flow');
   // 任一插件有未读 → 入口行尾一颗**静态**绿点(聚合入口按 AttentionDot 规范不呼吸,
   // 呼吸留给单条卡片;见 AttentionDot 头部的形态规范)。
   const hasRetirementUnread = useInstalledGhosts().some((ghost) => ghost.retirement?.unread);
@@ -135,6 +136,13 @@ function useSidebarNavigationActions(
       icon: SIDEBAR_NAVIGATION_ITEM_ICONS.automations,
       onSelect: () => navigate('/cc-agent/scheduled'),
       active: Boolean(onScheduleMatch),
+      showDot: false,
+    },
+    taskFlow: {
+      label: t('ccAgent.layout.taskFlow'),
+      icon: SIDEBAR_NAVIGATION_ITEM_ICONS.taskFlow,
+      onSelect: () => navigate('/cc-agent/task-flow'),
+      active: Boolean(onTaskFlowMatch),
       showDot: false,
     },
     plugins: {

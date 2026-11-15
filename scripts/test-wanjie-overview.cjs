@@ -6,10 +6,11 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../plugins/wanjie-overview/main.js'), 'utf8');
 const pause = () => new Promise(resolve => setImmediate(resolve));
 
-async function createRuntime({ available = true } = {}) {
+async function createRuntime({ available = true, taskFlow = null } = {}) {
   const messages = [];
   const toolResults = [];
   const companions = [{ id: 'one', name: '万界｜测试岗位', status: 'idle' }];
+  let currentTaskFlow = taskFlow;
   let hostMessage;
   let channel;
   let stored = {};
@@ -46,7 +47,11 @@ async function createRuntime({ available = true } = {}) {
           maxActive = Math.max(maxActive, active);
           await pause();
           active--;
-          return { companions, observedAt: Date.now() };
+          return {
+            companions,
+            ...(currentTaskFlow ? { taskFlow: currentTaskFlow } : {}),
+            observedAt: Date.now(),
+          };
         },
         async watch() { calls.watch++; return { subscriptionId: 'watch' }; },
         async reply() { return { reply: { text: '<script>text only</script>' } }; },
@@ -106,5 +111,22 @@ async function createRuntime({ available = true } = {}) {
   const unavailable = await createRuntime({ available: false });
   assert.match(unavailable.messages.at(-1).error, /伙伴查看接口/);
   assert.equal(unavailable.calls.watch, 0);
-  console.log('PASS: subscription, refresh concurrency, partial history, ID validation, saved-state consistency, unsupported host');
+  const sampleTaskFlow = {
+    nodes: [
+      { id: 'n1', kind: 'session', title: '策划需求', status: 'completed', botId: 'one', createdAtMs: 1000, startedAtMs: 1100, completedAtMs: 2000, updatedAtMs: 2000 },
+      { id: 'n2', kind: 'subagent', title: '开发实现', status: 'running', botId: 'two', createdAtMs: 2100, startedAtMs: 2200, updatedAtMs: 3000, isCrossDevice: true },
+    ],
+    edges: [{ id: 'e1', from: 'n1', to: 'n2', kind: 'cross_device', label: '跨电脑调度', isCrossDevice: true }],
+    selfDeviceId: 'dev-1',
+    selfDeviceName: '本机',
+    observedAt: 3500,
+    hiddenScheduledCount: 1,
+  };
+  const withFlow = await createRuntime({ taskFlow: sampleTaskFlow });
+  const flowState = [...withFlow.messages].reverse().find(item => item.type === 'state' && item.taskFlow);
+  assert.ok(flowState, 'state broadcast must include taskFlow when host provides it');
+  assert.equal(flowState.taskFlow.nodes.length, 2);
+  assert.equal(flowState.taskFlow.edges[0].kind, 'cross_device');
+  assert.equal(flowState.taskFlow.hiddenScheduledCount, 1);
+  console.log('PASS: subscription, refresh concurrency, partial history, ID validation, saved-state consistency, unsupported host, taskFlow broadcast');
 })().catch(error => { console.error(error); process.exitCode = 1; });

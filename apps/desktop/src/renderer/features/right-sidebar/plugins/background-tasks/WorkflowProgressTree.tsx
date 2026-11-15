@@ -23,8 +23,20 @@ import { formatModelShortLabel } from '@/lib/modelShortLabel';
 import { formatCompactTokens } from '@/lib/usageFormat';
 import { cn } from '@/lib/utils';
 
-import type { WorkflowTreeAgentRow, WorkflowTreeModel } from './workflowProgressModel';
+import {
+  workflowAgentVisualState,
+  type WorkflowAgentVisualState,
+  type WorkflowTreeAgentRow,
+  type WorkflowTreeModel,
+} from './workflowProgressModel';
 import { WorkflowAgentStrip } from './WorkflowAgentStrip';
+
+const BAR_BG: Record<WorkflowAgentVisualState, string> = {
+  done: 'bg-[var(--card-status-done)]',
+  running: 'bg-[var(--warning-accent)]',
+  failed: 'bg-[var(--error-fg)]',
+  queued: 'bg-[var(--surface-chip)]',
+};
 
 interface WorkflowProgressTreeProps {
   model: WorkflowTreeModel;
@@ -101,6 +113,14 @@ export function WorkflowProgressTree({ model }: WorkflowProgressTreeProps) {
       label: row.label,
     })),
   );
+  const maxDurationMs = Math.max(
+    aggregate.durationMs ?? 0,
+    ...model.groups.flatMap((g) =>
+      g.agents.map((a) => (typeof a.durationMs === 'number' ? a.durationMs : 0)),
+    ),
+    1000,
+  );
+  const titledGroupCount = model.groups.filter((g) => Boolean(g.title)).length;
 
   return (
     <div className="space-y-2">
@@ -109,6 +129,23 @@ export function WorkflowProgressTree({ model }: WorkflowProgressTreeProps) {
       </div>
       {/* 逐 agent 状态方块条:详情页不截断,大编队一眼总览。 */}
       {stripCells.length > 0 && <WorkflowAgentStrip cells={stripCells} />}
+      {titledGroupCount > 1 && (
+        <div
+          className="flex flex-wrap items-center gap-1 text-11 text-[var(--text-tertiary)]"
+          data-workflow-stage-chain="true"
+        >
+          {model.groups
+            .filter((g) => Boolean(g.title))
+            .map((g, idx) => (
+              <span key={`${g.title}-${idx}`} className="inline-flex items-center gap-1">
+                {idx > 0 && <span aria-hidden="true">→</span>}
+                <span className="rounded bg-[var(--surface-chip)] px-1.5 py-0.5 text-[var(--text-secondary)]">
+                  {idx + 1}. {g.title}
+                </span>
+              </span>
+            ))}
+        </div>
+      )}
       {model.logs.length > 0 && (
         <div className="space-y-0.5">
           {model.logs.map((line, index) => (
@@ -123,12 +160,13 @@ export function WorkflowProgressTree({ model }: WorkflowProgressTreeProps) {
         <div key={group.title ?? `orphan-${groupIndex}`} className="space-y-1">
           {group.title && (
             <div className="truncate text-11 font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
+              {groupIndex > 0 && <span className="mr-1">↳</span>}
               {group.title}
               {group.detail && <span className="normal-case"> · {group.detail}</span>}
             </div>
           )}
           {group.agents.map((row) => (
-            <AgentRow key={row.key} row={row} />
+            <AgentRow key={row.key} row={row} maxDurationMs={maxDurationMs} />
           ))}
         </div>
       ))}
@@ -136,7 +174,13 @@ export function WorkflowProgressTree({ model }: WorkflowProgressTreeProps) {
   );
 }
 
-function AgentRow({ row }: { row: WorkflowTreeAgentRow }) {
+function AgentRow({
+  row,
+  maxDurationMs,
+}: {
+  row: WorkflowTreeAgentRow;
+  maxDurationMs: number;
+}) {
   const { t } = useTranslation();
   const Icon = agentStateIcon(row.state);
   const spinning = isSpinning(row.state);
@@ -156,45 +200,61 @@ function AgentRow({ row }: { row: WorkflowTreeAgentRow }) {
           : row.lastToolName
         : undefined;
 
+  const visualState = workflowAgentVisualState(row.state);
+  const durationPct =
+    typeof row.durationMs === 'number' && maxDurationMs > 0
+      ? Math.max(6, Math.min(100, (row.durationMs / maxDurationMs) * 100))
+      : null;
+
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <Spinner
-        icon={Icon}
-        size={13}
-        spinning={spinning}
-        aria-label={stateLabel}
-        className={cn(
-          'shrink-0 text-[var(--text-secondary)]',
-          isErrorState && 'text-[var(--error-fg)]',
-        )}
-      />
-      <span className="min-w-0 truncate text-13 leading-5 text-[var(--text-primary)]">
-        {row.label}
-      </span>
-      {modelLabel && (
-        <span className="shrink-0 rounded-full bg-[var(--surface-chip)] px-1.5 py-0.5 text-11 leading-4 text-[var(--text-tertiary)]">
-          {modelLabel}
-        </span>
-      )}
-      {typeof row.attempt === 'number' && row.attempt > 1 && (
-        <span className="shrink-0 text-11 leading-4 text-[var(--text-tertiary)]">
-          {t('chat.workflowTree.attempt', { count: row.attempt })}
-        </span>
-      )}
-      {trailing && (
-        <span
+    <div className="space-y-1">
+      <div className="flex min-w-0 items-center gap-2">
+        <Spinner
+          icon={Icon}
+          size={13}
+          spinning={spinning}
+          aria-label={stateLabel}
           className={cn(
-            'min-w-0 flex-1 truncate text-12 leading-4',
-            isErrorState ? 'text-[var(--error-fg)]' : 'text-[var(--text-tertiary)]',
+            'shrink-0 text-[var(--text-secondary)]',
+            isErrorState && 'text-[var(--error-fg)]',
           )}
-        >
-          {trailing}
+        />
+        <span className="min-w-0 truncate text-13 leading-5 text-[var(--text-primary)]">
+          {row.label}
         </span>
-      )}
-      {isDoneState && typeof row.durationMs === 'number' && (
-        <span className="shrink-0 text-11 leading-4 text-[var(--text-tertiary)]">
-          {formatDuration(row.durationMs, t)}
-        </span>
+        {modelLabel && (
+          <span className="shrink-0 rounded-full bg-[var(--surface-chip)] px-1.5 py-0.5 text-11 leading-4 text-[var(--text-tertiary)]">
+            {modelLabel}
+          </span>
+        )}
+        {typeof row.attempt === 'number' && row.attempt > 1 && (
+          <span className="shrink-0 text-11 leading-4 text-[var(--text-tertiary)]">
+            {t('chat.workflowTree.attempt', { count: row.attempt })}
+          </span>
+        )}
+        {trailing && (
+          <span
+            className={cn(
+              'min-w-0 flex-1 truncate text-12 leading-4',
+              isErrorState ? 'text-[var(--error-fg)]' : 'text-[var(--text-tertiary)]',
+            )}
+          >
+            {trailing}
+          </span>
+        )}
+        {isDoneState && typeof row.durationMs === 'number' && (
+          <span className="shrink-0 text-11 leading-4 text-[var(--text-tertiary)]">
+            {formatDuration(row.durationMs, t)}
+          </span>
+        )}
+      </div>
+      {durationPct !== null && (
+        <div className="ml-5 h-1 overflow-hidden rounded-full bg-[var(--surface-chip)]">
+          <div
+            className={`h-full rounded-full ${BAR_BG[visualState]}`}
+            style={{ width: `${durationPct}%` }}
+          />
+        </div>
       )}
     </div>
   );

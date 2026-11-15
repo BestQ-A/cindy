@@ -6,6 +6,7 @@ const NON_SESSION_CC_AGENT_SEGMENTS = new Set([
   'new',
   'new-dialogue',
   'scheduled',
+  'task-flow',
 ]);
 
 /**

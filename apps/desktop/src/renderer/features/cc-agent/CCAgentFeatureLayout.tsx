@@ -104,12 +104,19 @@ function useTrackLastView(): void {
       return;
     }
 
-    // /cc-agent/:sessionId — 必须排除已经命中过的静态段（new / scheduled / files /
+    // /cc-agent/:sessionId — 必须排除已经命中过的静态段（new / scheduled / task-flow / files /
     // boot）。boot 是副窗启动网关(SecondaryWindowBootGate),只是过渡路由、并非真实
     // session,落它会污染 lastChatView。
     const sessionMatch = matchPath('/cc-agent/:sessionId', path);
     const sid = sessionMatch?.params.sessionId;
-    if (sid && sid !== 'new' && sid !== 'scheduled' && sid !== 'files' && sid !== 'boot') {
+    if (
+      sid &&
+      sid !== 'new' &&
+      sid !== 'scheduled' &&
+      sid !== 'task-flow' &&
+      sid !== 'files' &&
+      sid !== 'boot'
+    ) {
       saveLastChatView({ kind: 'session', sessionId: sid });
     }
   }, [location.pathname]);

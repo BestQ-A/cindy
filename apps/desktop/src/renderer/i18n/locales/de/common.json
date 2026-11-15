@@ -10350,7 +10350,14 @@
       "back": "Zurück",
       "progressSummary": "{{done}}/{{total}} Agents",
       "tokens": "{{value}} Tokens",
-      "noProgress": "Noch keine Fortschrittsdetails"
+      "noProgress": "Noch keine Fortschrittsdetails",
+      "viewSwitcher": "Ansicht für Hintergrundaufgaben wechseln",
+      "viewList": "Liste",
+      "viewTimeline": "Zeitachse & Abh.",
+      "timelineWindow": "Zeitspanne",
+      "planStepsSection": "Aktuelle Plan-Abhängigkeiten",
+      "executionTimeline": "Ausführungszeitachse",
+      "untitledTask": "Hintergrundaufgabe"
     },
     "resourceUsage": {
       "sections": {
@@ -10564,7 +10571,8 @@
         "automations": "Automatisierungen",
         "plugins": "Plugins",
         "bots": "Freunde",
-        "search": "Suchen"
+        "search": "Suchen",
+        "taskFlow": "Aufgabenfluss"
       }
     },
     "user": {
@@ -13565,7 +13573,16 @@
     },
     "planPill": {
       "step": "Schritt {{current}} von {{total}}",
-      "dismiss": "Plan schließen"
+      "dismiss": "Plan schließen",
+      "viewTabs": "Planansicht wechseln",
+      "modeList": "Liste",
+      "modeGantt": "Zeitachse",
+      "modeDag": "Abhängigkeiten",
+      "ganttTimeAxis": "Zeitverlauf nach Ausführungsstatus",
+      "ganttStageAxis": "Geordnet nach Schrittabhängigkeiten",
+      "dagNoExplicitEdges": "Keine expliziten blockedBy-Abhängigkeiten; folgende Schritte können parallel laufen.",
+      "dagStage": "Stufe {{index}}",
+      "blockedByPrefix": "Blockiert durch"
     },
     "forkOrigin": {
       "label": "Aus einer anderen Sitzung erstellt"
@@ -14881,7 +14898,8 @@
       "backToAutomations": "Zurück zu Automatisierungen",
       "backToReviewSource": "Zurück zur ursprünglichen Aufgabe",
       "waitForReply": "Warte auf deine Antwort im Dokumentbereich…",
-      "modelSwitchedFastModeOff": "Modell gewechselt, Fast Mode deaktiviert"
+      "modelSwitchedFastModeOff": "Modell gewechselt, Fast Mode deaktiviert",
+      "taskFlow": "Aufgabenfluss"
     },
     "remoteDesktopConfirmation": {
       "title": "Bestätigung auf dem Remotecomputer erforderlich",
@@ -20483,6 +20501,94 @@
     },
     "switchOffer": {
       "action": "Mit {{model}} fortfahren"
+    }
+  },
+  "taskFlow": {
+    "title": "Aufgabenfluss",
+    "subtitle": "Globale Ansicht von Aufgabenabhängigkeiten, geräteübergreifenden Übergaben und Zeitverlauf",
+    "viewSwitcher": "Aufgabenfluss-Ansicht",
+    "refresh": "Aktualisieren",
+    "searchPlaceholder": "Aufgaben, Begleiter, Computer oder Ordner suchen…",
+    "filterStatusLabel": "Nach Status filtern",
+    "localDevice": "Lokaler Computer",
+    "empty": "Keine Aufgaben für die aktuellen Filter gefunden.",
+    "views": {
+      "gantt": "Gantt-Zeitachse",
+      "dag": "Abhängigkeits-DAG"
+    },
+    "kpi": {
+      "totalNodes": "Knoten gesamt",
+      "runningNodes": "Laufend",
+      "totalEdges": "Abhängigkeiten",
+      "crossDeviceEdges": "Geräteübergreifend"
+    },
+    "statusFilter": {
+      "all": "Alle Status"
+    },
+    "toggles": {
+      "expandSteps": "Planschritte einblenden",
+      "onlyDependencies": "Nur verknüpfte Ketten",
+      "includeScheduled": "Geplante einschließen ({{count}})"
+    },
+    "groupBy": {
+      "label": "Bahnen",
+      "hierarchy": "Nach Hierarchie",
+      "computer": "Nach Computer",
+      "chain": "Nach Aufgabenkette"
+    },
+    "window": {
+      "label": "Zeitraum",
+      "1h": "1 Std",
+      "6h": "6 Std",
+      "24h": "24 Std",
+      "7d": "7 T",
+      "all": "Alle"
+    },
+    "columns": {
+      "taskItem": "Aufgabe / Begleiter",
+      "count": "{{count}} Einträge"
+    },
+    "status": {
+      "running": "Laufend",
+      "waiting": "Wartend",
+      "completed": "Abgeschlossen",
+      "failed": "Fehlgeschlagen",
+      "paused": "Pausiert",
+      "idle": "Leerlauf"
+    },
+    "nodeKind": {
+      "companion": "Begleiter",
+      "session": "Sitzung",
+      "subagent": "Subagent",
+      "orca_worker": "Team-Worker",
+      "group_step": "Gruppenschritt",
+      "plan_step": "Planschritt"
+    },
+    "edgeKind": {
+      "created_task": "Aufgabe erstellt",
+      "delegated": "Delegiert",
+      "forked": "Abgezweigt",
+      "handoff": "Übergabe",
+      "reported": "Rückmeldung",
+      "orca_dispatch": "Team-Zuweisung",
+      "subagent_spawn": "Subagent gestartet",
+      "blocked_by": "Blockiert durch"
+    },
+    "inspector": {
+      "title": "Knotendetails",
+      "close": "Details schließen",
+      "openSession": "In Cindy öffnen",
+      "computer": "Computer",
+      "folder": "Ordner",
+      "createdAt": "Erstellt",
+      "startedAt": "Gestartet",
+      "completedAt": "Abgeschlossen",
+      "elapsed": "Dauer",
+      "upstream": "Vorgelagerte Abhängigkeiten ({{count}})",
+      "noUpstream": "Keine Vorgänger",
+      "downstream": "Nachgelagerte Aufgaben ({{count}})",
+      "noDownstream": "Keine Nachfolger",
+      "internalSteps": "Interne Planschritte ({{count}})"
     }
   }
 }

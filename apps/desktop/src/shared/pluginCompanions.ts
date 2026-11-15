@@ -129,10 +129,15 @@ export interface PluginCompanionHierarchy {
   updatedAt?: number;
 }
 
+import type { TaskFlowSnapshot } from './taskFlowGraph.js';
+
+export type PluginCompanionTaskFlowSnapshot = TaskFlowSnapshot;
+
 export interface PluginCompanionListResult {
   companions: PluginCompanion[];
   folders: PluginCompanionFolder[];
   hierarchy: PluginCompanionHierarchy;
+  taskFlow?: TaskFlowSnapshot;
   observedAt: number;
 }
 

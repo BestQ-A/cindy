@@ -5609,6 +5609,11 @@ interface ElectronAPI {
         ) => void,
       ) => () => void;
     };
+    taskFlow: {
+      snapshot: (
+        opts?: { includeScheduled?: boolean; includeRemote?: boolean; limitSessions?: number },
+      ) => Promise<import('../shared/taskFlowGraph').TaskFlowSnapshot>;
+    };
     /** V0.4 (C10): one-shot toast trigger when ensureReady ran two-level fallback. */
     onCorruptionRestored: (cb: (info: CorruptionRestoredPayload) => void) => () => void;
     /** #37: release 端检测到 schema drift 时的一次性 toast 事件。 */

@@ -1,6 +1,6 @@
 const channel = new BroadcastChannel('wanjie-overview-v1');
 const verificationStatuses = new Set(['passed', 'failed', 'blocked', 'pending']);
-let state = { companions: [], folders: [], hierarchy: null, observedAt: null, verification: null, devices: [], run: null, error: null };
+let state = { companions: [], folders: [], hierarchy: null, taskFlow: null, observedAt: null, verification: null, devices: [], run: null, error: null };
 let roster = [];
 let subscriptionId = null;
 let refreshPromise = null;
@@ -131,11 +131,13 @@ async function refresh() {
       const result = await cindy.companions.list();
       const companions = Array.isArray(result?.companions) ? result.companions : [];
       const hierarchy = normalizeHierarchy(result?.hierarchy, result?.folders);
+      const taskFlow = result?.taskFlow && typeof result.taskFlow === 'object' ? result.taskFlow : null;
       state = {
         ...state,
         companions,
         folders: hierarchy.folders,
         hierarchy,
+        taskFlow,
         observedAt: result?.observedAt ?? null,
         error: null,
       };

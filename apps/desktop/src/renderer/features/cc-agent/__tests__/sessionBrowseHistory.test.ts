@@ -27,6 +27,7 @@ describe('sessionIdFromPathname', () => {
     '/cc-agent/new',
     '/cc-agent/new-dialogue',
     '/cc-agent/scheduled',
+    '/cc-agent/task-flow',
     '/cc-agent/boot',
     '/cc-agent/files/session-a',
     '/cc-agent/orca/session-a',

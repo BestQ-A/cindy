@@ -10431,7 +10431,14 @@
       "back": "Atrás",
       "progressSummary": "{{done}}/{{total}} Agents",
       "tokens": "{{value}} tokens",
-      "noProgress": "Aún no hay detalles de progreso"
+      "noProgress": "Aún no hay detalles de progreso",
+      "viewSwitcher": "Cambiar vista de tareas en segundo plano",
+      "viewList": "Lista",
+      "viewTimeline": "Tiempo y dep.",
+      "timelineWindow": "Intervalo",
+      "planStepsSection": "Dependencias del plan actual",
+      "executionTimeline": "Línea temporal de ejecución",
+      "untitledTask": "Tarea en segundo plano"
     },
     "resourceUsage": {
       "sections": {
@@ -10646,7 +10653,8 @@
         "automations": "Automatizaciones",
         "plugins": "Complementos",
         "bots": "Amigos",
-        "search": "Buscar"
+        "search": "Buscar",
+        "taskFlow": "Flujo de tareas"
       }
     },
     "user": {
@@ -13676,7 +13684,16 @@
     },
     "planPill": {
       "step": "Paso {{current}} de {{total}}",
-      "dismiss": "Cerrar plan"
+      "dismiss": "Cerrar plan",
+      "viewTabs": "Cambiar vista del plan",
+      "modeList": "Lista",
+      "modeGantt": "Línea temporal",
+      "modeDag": "Dependencias",
+      "ganttTimeAxis": "Progreso en el tiempo real",
+      "ganttStageAxis": "Ordenado por dependencias",
+      "dagNoExplicitEdges": "Sin dependencias blockedBy explícitas; los pasos pueden ejecutarse en paralelo.",
+      "dagStage": "Etapa {{index}}",
+      "blockedByPrefix": "Bloqueado por"
     },
     "forkOrigin": {
       "label": "Creada a partir de otra sesión"
@@ -15017,7 +15034,8 @@
       "backToReviewSource": "Volver a la tarea de origen",
       "waitForReply": "Esperando tu respuesta en el área del documento…",
       "modelSwitchedFastModeOff": "Modelo cambiado, Fast Mode desactivado",
-      "markedAsRead_many": "Se marcaron {{count}} ejecuciones como leídas"
+      "markedAsRead_many": "Se marcaron {{count}} ejecuciones como leídas",
+      "taskFlow": "Flujo de tareas"
     },
     "remoteDesktopConfirmation": {
       "title": "Se requiere confirmación en la computadora remota",
@@ -20671,6 +20689,94 @@
     },
     "switchOffer": {
       "action": "Continuar con {{model}}"
+    }
+  },
+  "taskFlow": {
+    "title": "Flujo de tareas",
+    "subtitle": "Vista global de dependencias, traspasos entre equipos y progreso temporal en vivo",
+    "viewSwitcher": "Vista de flujo de tareas",
+    "refresh": "Actualizar",
+    "searchPlaceholder": "Buscar tareas, compañeros, equipos o carpetas…",
+    "filterStatusLabel": "Filtrar por estado",
+    "localDevice": "Equipo local",
+    "empty": "No hay tareas que coincidan con los filtros.",
+    "views": {
+      "gantt": "Cronograma Gantt",
+      "dag": "Grafo de dependencias"
+    },
+    "kpi": {
+      "totalNodes": "Nodos totales",
+      "runningNodes": "En curso",
+      "totalEdges": "Enlaces",
+      "crossDeviceEdges": "Multi-equipo"
+    },
+    "statusFilter": {
+      "all": "Todos los estados"
+    },
+    "toggles": {
+      "expandSteps": "Expandir pasos",
+      "onlyDependencies": "Solo cadenas enlazadas",
+      "includeScheduled": "Incluir programadas ({{count}})"
+    },
+    "groupBy": {
+      "label": "Agrupar",
+      "hierarchy": "Por jerarquía",
+      "computer": "Por equipo",
+      "chain": "Por cadena"
+    },
+    "window": {
+      "label": "Ventana",
+      "1h": "1 h",
+      "6h": "6 h",
+      "24h": "24 h",
+      "7d": "7 d",
+      "all": "Todo"
+    },
+    "columns": {
+      "taskItem": "Tarea / Compañero",
+      "count": "{{count}} elementos"
+    },
+    "status": {
+      "running": "En curso",
+      "waiting": "Esperando",
+      "completed": "Completada",
+      "failed": "Error",
+      "paused": "En pausa",
+      "idle": "Inactiva"
+    },
+    "nodeKind": {
+      "companion": "Compañero",
+      "session": "Sesión",
+      "subagent": "Subagente",
+      "orca_worker": "Trabajador",
+      "group_step": "Paso grupal",
+      "plan_step": "Paso del plan"
+    },
+    "edgeKind": {
+      "created_task": "Tarea creada",
+      "delegated": "Delegado",
+      "forked": "Bifurcado",
+      "handoff": "Traspaso",
+      "reported": "Reportado",
+      "orca_dispatch": "Despacho de equipo",
+      "subagent_spawn": "Subagente iniciado",
+      "blocked_by": "Bloqueado por"
+    },
+    "inspector": {
+      "title": "Detalle del nodo",
+      "close": "Cerrar detalle",
+      "openSession": "Abrir en Cindy",
+      "computer": "Equipo",
+      "folder": "Carpeta",
+      "createdAt": "Creado",
+      "startedAt": "Iniciado",
+      "completedAt": "Completado",
+      "elapsed": "Duración",
+      "upstream": "Dependencias previas ({{count}})",
+      "noUpstream": "Sin dependencias previas",
+      "downstream": "Tareas posteriores ({{count}})",
+      "noDownstream": "Sin tareas posteriores",
+      "internalSteps": "Pasos internos del plan ({{count}})"
     }
   }
 }

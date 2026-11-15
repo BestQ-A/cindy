@@ -15,7 +15,7 @@ const MAX_ENTRIES = 50;
 
 const SESSION_VIEW_PATH = /^\/cc-agent\/([^/]+)$/;
 /** `/cc-agent/<静态段>` 不是任务 id(路由另有对应页面,见 router.tsx)。 */
-const NON_SESSION_SEGMENTS = new Set(['new', 'new-dialogue', 'scheduled', 'boot']);
+const NON_SESSION_SEGMENTS = new Set(['new', 'new-dialogue', 'scheduled', 'task-flow', 'boot']);
 
 /** 当前路径是一个任务视图时返回其 sessionId,否则 null。 */
 export function sessionIdFromPathname(pathname: string): string | null {

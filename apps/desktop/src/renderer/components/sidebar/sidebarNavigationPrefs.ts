@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { Plug, Search, Timer, type LucideIcon } from 'lucide-react';
+import { GitBranch, Plug, Search, Timer, type LucideIcon } from 'lucide-react';
 
 import { readSidebarOwnerStorage, writeSidebarOwnerStorage } from '@/lib/sidebarOwnerStorage';
 
@@ -8,10 +8,11 @@ import { readSidebarOwnerStorage, writeSidebarOwnerStorage } from '@/lib/sidebar
  * Teammates left this list on 2026-10-13: they live in the sidebar's own section above
  * Pinned. Saved orders and visibility that still name `bots` are dropped on read.
  */
-export type SidebarNavigationItemId = 'automations' | 'plugins' | 'search';
+export type SidebarNavigationItemId = 'automations' | 'taskFlow' | 'plugins' | 'search';
 
 export const SIDEBAR_NAVIGATION_ITEMS: readonly SidebarNavigationItemId[] = [
   'automations',
+  'taskFlow',
   'plugins',
   'search',
 ];
@@ -19,12 +20,14 @@ export const SIDEBAR_NAVIGATION_ITEMS: readonly SidebarNavigationItemId[] = [
 /** One icon per built-in entry, shared by the sidebar rows, the rail, More and Customize. */
 export const SIDEBAR_NAVIGATION_ITEM_ICONS: Record<SidebarNavigationItemId, LucideIcon> = {
   automations: Timer,
+  taskFlow: GitBranch,
   plugins: Plug,
   search: Search,
 };
 
 export const DEFAULT_SIDEBAR_NAVIGATION_VISIBLE: readonly SidebarNavigationItemId[] = [
   'automations',
+  'taskFlow',
   'plugins',
   'search',
 ];

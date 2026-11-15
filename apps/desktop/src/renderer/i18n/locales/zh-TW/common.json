@@ -10307,7 +10307,14 @@
       "back": "返回",
       "progressSummary": "{{done}}/{{total}} Agent",
       "tokens": "{{value}} tokens",
-      "noProgress": "暫無進度詳情"
+      "noProgress": "暫無進度詳情",
+      "viewSwitcher": "背景任務檢視切換",
+      "viewList": "清單",
+      "viewTimeline": "時間線與依賴",
+      "timelineWindow": "時間跨度",
+      "planStepsSection": "目前計劃依賴步驟",
+      "executionTimeline": "背景任務執行時間線",
+      "untitledTask": "背景任務"
     },
     "resourceUsage": {
       "sections": {
@@ -10521,7 +10528,8 @@
         "automations": "自動化",
         "plugins": "插件",
         "bots": "夥伴",
-        "search": "搜尋"
+        "search": "搜尋",
+        "taskFlow": "任務脈絡"
       }
     },
     "user": {
@@ -13548,7 +13556,16 @@
     },
     "planPill": {
       "step": "第 {{current}} / {{total}} 步",
-      "dismiss": "關閉計劃"
+      "dismiss": "關閉計劃",
+      "viewTabs": "計劃檢視切換",
+      "modeList": "清單",
+      "modeGantt": "時間軸",
+      "modeDag": "依賴圖",
+      "ganttTimeAxis": "依實際狀態推進時間分佈",
+      "ganttStageAxis": "依階段依賴與順序推進",
+      "dagNoExplicitEdges": "未宣告前置 blockedBy 依賴，以下步驟處於同級可執行階段",
+      "dagStage": "階段 {{index}}",
+      "blockedByPrefix": "前置"
     },
     "forkOrigin": {
       "label": "基於原任務建立"
@@ -14815,7 +14832,8 @@
       "backToAutomations": "返回 Automations",
       "backToReviewSource": "返回來源任務",
       "waitForReply": "等待你在文件區回覆…",
-      "modelSwitchedFastModeOff": "已切換模型，Fast Mode 已關閉"
+      "modelSwitchedFastModeOff": "已切換模型，Fast Mode 已關閉",
+      "taskFlow": "任務脈絡"
     },
     "remoteDesktopConfirmation": {
       "title": "需要在遠端電腦上確認",
@@ -20410,6 +20428,94 @@
     },
     "switchOffer": {
       "action": "換到 {{model}} 繼續"
+    }
+  },
+  "taskFlow": {
+    "title": "任務脈絡",
+    "subtitle": "全域檢視夥伴、跨電腦對話與任務步驟之間的依賴流向與即時時間推進",
+    "viewSwitcher": "任務脈絡檢視切換",
+    "refresh": "重新整理",
+    "searchPlaceholder": "搜尋任務、夥伴、電腦或分組…",
+    "filterStatusLabel": "依狀態篩選",
+    "localDevice": "本機電腦",
+    "empty": "目前篩選條件下尚無任務軌跡。",
+    "views": {
+      "gantt": "甘特時間軸",
+      "dag": "依賴拓撲圖"
+    },
+    "kpi": {
+      "totalNodes": "總任務節點",
+      "runningNodes": "進行中",
+      "totalEdges": "依賴與交接連線",
+      "crossDeviceEdges": "跨電腦協同"
+    },
+    "statusFilter": {
+      "all": "全部狀態"
+    },
+    "toggles": {
+      "expandSteps": "展開內部步驟",
+      "onlyDependencies": "僅看有依賴鏈路",
+      "includeScheduled": "包含定時巡檢 ({{count}})"
+    },
+    "groupBy": {
+      "label": "泳道分組",
+      "hierarchy": "依分組層級",
+      "computer": "依電腦",
+      "chain": "依任務鏈路"
+    },
+    "window": {
+      "label": "時間範圍",
+      "1h": "1 小時",
+      "6h": "6 小時",
+      "24h": "24 小時",
+      "7d": "7 天",
+      "all": "全部"
+    },
+    "columns": {
+      "taskItem": "任務項 / 夥伴",
+      "count": "{{count}} 項"
+    },
+    "status": {
+      "running": "進行中",
+      "waiting": "等待中",
+      "completed": "已完成",
+      "failed": "失敗",
+      "paused": "已暫停",
+      "idle": "閒置"
+    },
+    "nodeKind": {
+      "companion": "夥伴",
+      "session": "任務對話",
+      "subagent": "子代理",
+      "orca_worker": "協作執行體",
+      "group_step": "群組協同步驟",
+      "plan_step": "計劃步驟"
+    },
+    "edgeKind": {
+      "created_task": "發起任務",
+      "delegated": "委派執行",
+      "forked": "分支衍生",
+      "handoff": "跨對話交接",
+      "reported": "結果回傳",
+      "orca_dispatch": "團隊派發",
+      "subagent_spawn": "啟動子代理",
+      "blocked_by": "前置阻塞依賴"
+    },
+    "inspector": {
+      "title": "任務節點詳情",
+      "close": "關閉詳情",
+      "openSession": "在 Cindy 中開啟",
+      "computer": "所在電腦",
+      "folder": "夥伴分組",
+      "createdAt": "建立時間",
+      "startedAt": "開始執行",
+      "completedAt": "完成時間",
+      "elapsed": "累計耗時",
+      "upstream": "上游依賴 / 來源 ({{count}})",
+      "noUpstream": "無上游前置任務",
+      "downstream": "下游推進 / 後續 ({{count}})",
+      "noDownstream": "尚無下游衍生任務",
+      "internalSteps": "內部計劃步驟 ({{count}})"
     }
   }
 }

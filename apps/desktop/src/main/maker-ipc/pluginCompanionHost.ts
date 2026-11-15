@@ -27,6 +27,21 @@ import { readLatestMirrorRows, readMirrorRowsBefore } from '../companion-cloud/h
 import { mirrorMessageText, type CompanionMirrorRow } from '../companion-cloud/mirror.js';
 import { companionAvatarThumbnail } from '../agent-island/companionIdentity.js';
 import { summarizeInteraction } from '../mcp-integrations/taskPhase.js';
+import {
+  collectLocalTaskFlowSnapshot,
+  registerCrossDeviceTaskFlowReader,
+  type TaskFlowSnapshotRequest,
+} from '../localDb/ipc/taskFlow.js';
+import {
+  mergeTaskFlowSnapshots,
+  type TaskFlowEdge,
+  type TaskFlowEdgeKind,
+  type TaskFlowInternalStep,
+  type TaskFlowNode,
+  type TaskFlowNodeKind,
+  type TaskFlowNodeStatus,
+  type TaskFlowSnapshot,
+} from '../../shared/taskFlowGraph.js';
 
 /** Longest reply text handed to a plugin; longer replies are cut and marked truncated. */
 export const PLUGIN_COMPANION_REPLY_MAX = 8000;
@@ -189,6 +204,8 @@ export interface PluginCompanionHostDeps {
   remote?: PluginCompanionRemoteDeps;
   /** Optional hierarchy reader override (defaults to owner-scoped main botHierarchyStore). */
   readHierarchy?: () => BotHierarchyConfigV1;
+  /** Optional local Task Flow snapshot override (defaults to main SQLite collector). */
+  collectLocalTaskFlow?: (opts?: TaskFlowSnapshotRequest) => Promise<TaskFlowSnapshot>;
   now?: () => number;
 }
 
@@ -205,6 +222,140 @@ interface RemoteHomeView extends CompanionView {
   reachable: boolean;
   /** False for an older home that only lists status: no requests or replies. */
   live: boolean;
+  taskFlow?: TaskFlowSnapshot;
+}
+
+const VALID_TF_NODE_KINDS = new Set<TaskFlowNodeKind>([
+  'companion', 'session', 'subagent', 'orca_worker', 'group_step', 'plan_step',
+]);
+const VALID_TF_NODE_STATUS = new Set<TaskFlowNodeStatus>([
+  'running', 'waiting', 'completed', 'failed', 'paused', 'idle',
+]);
+const VALID_TF_EDGE_KINDS = new Set<TaskFlowEdgeKind>([
+  'created_task', 'delegated', 'forked', 'handoff', 'reported', 'orca_dispatch', 'subagent_spawn', 'blocked_by',
+]);
+const MAX_REMOTE_TF_NODES = 500;
+const MAX_REMOTE_TF_EDGES = 1500;
+const MAX_REMOTE_TF_STEPS = 50;
+
+function parseRemoteTaskFlow(
+  value: unknown,
+  deviceId: string,
+  deviceName: string | null,
+): TaskFlowSnapshot | undefined {
+  const root = record(value);
+  if (!Array.isArray(root.nodes) && !Array.isArray(root.edges)) return undefined;
+
+  const nodes: TaskFlowNode[] = [];
+  for (const rawNode of (Array.isArray(root.nodes) ? root.nodes : []).slice(0, MAX_REMOTE_TF_NODES)) {
+    const item = record(rawNode);
+    const id = text(item.id, 512);
+    const title = text(item.title, 256);
+    const kind = typeof item.kind === 'string' && VALID_TF_NODE_KINDS.has(item.kind as TaskFlowNodeKind)
+      ? (item.kind as TaskFlowNodeKind)
+      : null;
+    const status = typeof item.status === 'string' && VALID_TF_NODE_STATUS.has(item.status as TaskFlowNodeStatus)
+      ? (item.status as TaskFlowNodeStatus)
+      : 'idle';
+    const createdAtMs = time(item.createdAtMs);
+    const updatedAtMs = time(item.updatedAtMs);
+    if (!id || !title || !kind || createdAtMs === null || updatedAtMs === null) continue;
+
+    const internalSteps: TaskFlowInternalStep[] = [];
+    if (Array.isArray(item.internalSteps)) {
+      for (const rawStep of item.internalSteps.slice(0, MAX_REMOTE_TF_STEPS)) {
+        const s = record(rawStep);
+        const stepId = text(s.stepId, 128);
+        const content = text(s.content, 200);
+        const sStatus =
+          s.status === 'completed' || s.status === 'in_progress' || s.status === 'pending'
+            ? s.status
+            : 'pending';
+        if (!stepId || !content) continue;
+        internalSteps.push({
+          stepId,
+          content,
+          status: sStatus,
+          ...(Array.isArray(s.blockedBy)
+            ? { blockedBy: s.blockedBy.flatMap(b => text(b, 128) ?? []).slice(0, 20) }
+            : {}),
+          ...(text(s.owner, 64) ? { owner: text(s.owner, 64) } : {}),
+          ...(time(s.createdAtMs) !== null ? { createdAtMs: time(s.createdAtMs)! } : {}),
+          ...(time(s.startedAtMs) !== null ? { startedAtMs: time(s.startedAtMs)! } : {}),
+          ...(time(s.completedAtMs) !== null ? { completedAtMs: time(s.completedAtMs)! } : {}),
+          ...(time(s.updatedAtMs) !== null ? { updatedAtMs: time(s.updatedAtMs)! } : {}),
+        });
+      }
+    }
+
+    const stepCounts = record(item.stepCounts);
+    nodes.push({
+      id,
+      kind,
+      title,
+      ...(text(item.subtitle, 200) ? { subtitle: text(item.subtitle, 200) } : {}),
+      status,
+      ...(text(item.source, 64) ? { source: text(item.source, 64) } : {}),
+      deviceId: text(item.deviceId, 128) ?? deviceId,
+      deviceName: text(item.deviceName, 128) ?? deviceName ?? null,
+      ...(text(item.botId, 128) ? { botId: text(item.botId, 128) } : {}),
+      ...(text(item.botName, 128) ? { botName: text(item.botName, 128) } : {}),
+      ...(text(item.botAvatar, 32) ? { botAvatar: text(item.botAvatar, 32) } : {}),
+      ...(text(item.folderId, 128) ? { folderId: text(item.folderId, 128) } : {}),
+      ...(Array.isArray(item.folderBreadcrumb)
+        ? { folderBreadcrumb: item.folderBreadcrumb.flatMap(f => text(f, 80) ?? []).slice(0, 8) }
+        : {}),
+      ...(text(item.sessionId, 256) ? { sessionId: text(item.sessionId, 256) } : {}),
+      ...(text(item.parentNodeId, 512) ? { parentNodeId: text(item.parentNodeId, 512) } : {}),
+      ...(typeof item.progressPct === 'number' && Number.isFinite(item.progressPct)
+        ? { progressPct: Math.max(0, Math.min(100, item.progressPct)) }
+        : {}),
+      ...(typeof stepCounts.completed === 'number' && typeof stepCounts.total === 'number'
+        ? { stepCounts: { completed: stepCounts.completed, total: stepCounts.total } }
+        : {}),
+      createdAtMs,
+      ...(time(item.startedAtMs) !== null ? { startedAtMs: time(item.startedAtMs)! } : {}),
+      ...(time(item.completedAtMs) !== null ? { completedAtMs: time(item.completedAtMs)! } : {}),
+      updatedAtMs,
+      ...(item.isCrossDevice === true ? { isCrossDevice: true } : {}),
+      ...(item.isPlaceholder === true ? { isPlaceholder: true } : {}),
+      ...(internalSteps.length > 0 ? { internalSteps } : {}),
+    });
+  }
+
+  const edges: TaskFlowEdge[] = [];
+  for (const rawEdge of (Array.isArray(root.edges) ? root.edges : []).slice(0, MAX_REMOTE_TF_EDGES)) {
+    const item = record(rawEdge);
+    const id = text(item.id, 512);
+    const from = text(item.from, 512);
+    const to = text(item.to, 512);
+    const kind = typeof item.kind === 'string' && VALID_TF_EDGE_KINDS.has(item.kind as TaskFlowEdgeKind)
+      ? (item.kind as TaskFlowEdgeKind)
+      : null;
+    if (!id || !from || !to || !kind) continue;
+    edges.push({
+      id,
+      from,
+      to,
+      kind,
+      ...(text(item.label, 80) ? { label: text(item.label, 80) } : {}),
+      ...(time(item.timestampMs) !== null ? { timestampMs: time(item.timestampMs)! } : {}),
+      ...(typeof item.count === 'number' && Number.isFinite(item.count) ? { count: item.count } : {}),
+      ...(item.isCrossDevice === true ? { isCrossDevice: true } : {}),
+    });
+  }
+
+  return {
+    nodes,
+    edges,
+    selfDeviceId: text(root.selfDeviceId, 128) ?? deviceId,
+    selfDeviceName: text(root.selfDeviceName, 128) ?? deviceName,
+    observedAt: time(root.observedAt) ?? Date.now(),
+    hiddenScheduledCount:
+      typeof root.hiddenScheduledCount === 'number' && Number.isFinite(root.hiddenScheduledCount)
+        ? Math.max(0, Math.trunc(root.hiddenScheduledCount))
+        : 0,
+  };
 }
 
 function companionIdFromHierarchyKey(key: string): string | null {
@@ -581,7 +732,15 @@ export function createPluginCompanionHost(deps: PluginCompanionHostDeps) {
       const value = record(await remote.invoke(deviceId, COMPANION_LIVE_CHANNEL, [{ version: COMPANION_LIVE_VERSION, kind: 'list' }]));
       const companions = (Array.isArray(value.companions) ? value.companions : []).slice(0, MAX_REMOTE_COMPANIONS)
         .flatMap(item => parseRemoteCompanion(item, deviceName) ?? []);
-      return { companions, sessions: stringMap(value.sessions), conversations: stringMap(value.conversations), reachable: true, live: true };
+      const taskFlow = parseRemoteTaskFlow(value.taskFlow, deviceId, deviceName);
+      return {
+        companions,
+        sessions: stringMap(value.sessions),
+        conversations: stringMap(value.conversations),
+        reachable: true,
+        live: true,
+        ...(taskFlow ? { taskFlow } : {}),
+      };
     } catch (error) {
       if (errorCode(error) !== 'CHANNEL_NOT_ALLOWED') throw error;
     }
@@ -662,6 +821,50 @@ export function createPluginCompanionHost(deps: PluginCompanionHostDeps) {
   let confirming = false;
 
   const readConfig = () => normalizeBotHierarchyConfig((deps.readHierarchy ?? readBotHierarchyConfig)());
+  const readLocalTaskFlow = (opts?: TaskFlowSnapshotRequest) =>
+    deps.collectLocalTaskFlow
+      ? deps.collectLocalTaskFlow(opts)
+      : collectLocalTaskFlowSnapshot(opts, {
+          nowMs: now,
+          readHierarchy: readConfig,
+        });
+
+  const mergeWithRemoteTaskFlows = async (
+    local: TaskFlowSnapshot,
+    guard?: () => void,
+  ): Promise<TaskFlowSnapshot> => {
+    const view = companionHomes.snapshot();
+    const actorHomes = [...remoteActors(new Set()).keys()];
+    const devices = deps.remote ? await deps.remote.devices().catch(() => null) : null;
+    guard?.();
+    const deviceById = new Map((devices ?? []).map(d => [d.deviceId, d]));
+    const peerIds = new Set<string>(actorHomes);
+    for (const dev of devices ?? []) {
+      if (dev.deviceId !== view.selfDeviceId && dev.online && dev.reachable) {
+        peerIds.add(dev.deviceId);
+      }
+    }
+    if (peerIds.size === 0) return local;
+
+    const remoteSnapshots = (
+      await Promise.all(
+        [...peerIds].map(async (deviceId) => {
+          const dev = deviceById.get(deviceId);
+          if (!dev?.online || !dev.reachable) return null;
+          const home = await readHome(deviceId, dev.name);
+          return home.taskFlow
+            ? { deviceId, deviceName: dev.name, snapshot: home.taskFlow }
+            : null;
+        }),
+      )
+    ).filter((item): item is { deviceId: string; deviceName: string; snapshot: TaskFlowSnapshot } => item !== null);
+    guard?.();
+    return remoteSnapshots.length > 0
+      ? mergeTaskFlowSnapshots(local, remoteSnapshots)
+      : local;
+  };
+
+  registerCrossDeviceTaskFlowReader((local) => mergeWithRemoteTaskFlows(local));
 
   const adapter: PluginCompanionAdapter = {
     async list(guard) {
@@ -696,6 +899,12 @@ export function createPluginCompanionHost(deps: PluginCompanionHostDeps) {
     async hierarchy(guard) {
       guard();
       return buildPluginCompanionHierarchy(readConfig());
+    },
+
+    async taskFlow(guard) {
+      const local = await readLocalTaskFlow();
+      guard();
+      return mergeWithRemoteTaskFlows(local, guard);
     },
 
     async avatar(companionId, guard) {
@@ -838,7 +1047,8 @@ export function createPluginCompanionHost(deps: PluginCompanionHostDeps) {
       const noGuard = () => {};
       if (request.kind === 'list') {
         const view = await localView(noGuard);
-        return { version: COMPANION_LIVE_VERSION, ...view };
+        const taskFlow = await readLocalTaskFlow().catch(() => undefined);
+        return { version: COMPANION_LIVE_VERSION, ...view, ...(taskFlow ? { taskFlow } : {}) };
       }
       if (request.kind === 'reply' && typeof request.companionId === 'string' && request.companionId) {
         return { version: COMPANION_LIVE_VERSION, reply: await localReply(request.companionId, noGuard) };

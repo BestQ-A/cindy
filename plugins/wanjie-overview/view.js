@@ -5,9 +5,863 @@ const STORAGE_KEY = 'wanjie-overview:view-prefs:v1';
 const statuses = { running: '运行中', awaiting: '待处理', error: '异常', done: '已完成', unread: '未读', idle: '空闲', offline: '离线' };
 const verificationLabels = { passed: '通过', failed: '失败', blocked: '受阻', pending: '待验证' };
 const phases = { thinking: '正在思考', replying: '正在回复', 'reading-file': '正在读文件', 'saving-file': '正在保存', searching: '正在搜索', 'searching-files': '正在查找文件', 'reading-web': '正在阅读网页', testing: '正在测试', checking: '正在检查', compacting: '正在整理上下文', processing: '正在处理' };
-let snapshot = { companions: [], folders: [], hierarchy: null, verification: null, devices: [], run: null, observedAt: null, error: null };
+let snapshot = { companions: [], folders: [], hierarchy: null, taskFlow: null, verification: null, devices: [], run: null, observedAt: null, error: null };
 let receivedState = false;
 let selectedFilter = 'all';
+
+const TASKFLOW_WINDOWS_MS = {
+  '1h': 60 * 60 * 1000,
+  '6h': 6 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  all: Infinity,
+};
+
+const TASKFLOW_STATUS_LABELS = {
+  running: '进行中',
+  waiting: '等待中',
+  completed: '已完成',
+  failed: '异常',
+  paused: '已暂停',
+  idle: '空闲',
+};
+
+const TASKFLOW_EDGE_LABELS = {
+  blocks: '前置阻塞',
+  delegates: '委派子任务',
+  cross_device: '跨电脑调度',
+  handoff: '交接续作',
+  subagent: '子代理',
+};
+
+let taskFlowPrefs = {
+  view: 'gantt',
+  lane: 'folder',
+  window: '6h',
+  showSteps: true,
+  linkedOnly: false,
+  selectedNodeId: null,
+  hoveredNodeId: null,
+};
+
+let taskFlowControlsBound = false;
+
+function tfSvgEl(tag, attrs = {}) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v !== undefined && v !== null) el.setAttribute(k, String(v));
+  }
+  return el;
+}
+
+function tfStatusLabel(status) {
+  return TASKFLOW_STATUS_LABELS[status] || status || '未知';
+}
+
+function tfEdgeLabel(edge) {
+  if (edge?.label) return edge.label;
+  return TASKFLOW_EDGE_LABELS[edge?.kind] || edge?.kind || '依赖';
+}
+
+function tfFormatDuration(startMs, endMs, status, nowMs) {
+  if (!Number.isFinite(startMs) || startMs <= 0) return '待开始';
+  const effectiveEnd = Number.isFinite(endMs) && endMs >= startMs
+    ? endMs
+    : (status === 'running' || status === 'waiting' ? Math.max(startMs, nowMs) : startMs);
+  const diffSec = Math.max(0, Math.round((effectiveEnd - startMs) / 1000));
+  if (diffSec < 60) return `${diffSec}s`;
+  const mins = Math.floor(diffSec / 60);
+  const secs = diffSec % 60;
+  if (mins < 60) return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const remM = mins % 60;
+  if (hrs < 24) return remM > 0 ? `${hrs}h ${remM}m` : `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ${hrs % 24}h`;
+}
+
+function tfFormatClock(ms, withDate) {
+  if (!Number.isFinite(ms)) return '--';
+  const d = new Date(ms);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  if (!withDate) return `${hh}:${mm}`;
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${m}-${day} ${hh}:${mm}`;
+}
+
+function tfComputeLineage(activeId, edges) {
+  if (!activeId) return null;
+  const upstream = new Set();
+  const downstream = new Set();
+  const backAdj = new Map();
+  const fwdAdj = new Map();
+  for (const edge of edges) {
+    if (!fwdAdj.has(edge.from)) fwdAdj.set(edge.from, []);
+    fwdAdj.get(edge.from).push(edge.to);
+    if (!backAdj.has(edge.to)) backAdj.set(edge.to, []);
+    backAdj.get(edge.to).push(edge.from);
+  }
+  const walk = (start, adj, targetSet) => {
+    const queue = [start];
+    while (queue.length) {
+      const cur = queue.shift();
+      for (const next of (adj.get(cur) || [])) {
+        if (next !== activeId && !targetSet.has(next)) {
+          targetSet.add(next);
+          queue.push(next);
+        }
+      }
+    }
+  };
+  walk(activeId, backAdj, upstream);
+  walk(activeId, fwdAdj, downstream);
+  const edgeIds = new Set();
+  for (const edge of edges) {
+    const inUp = (edge.from === activeId || upstream.has(edge.from)) && (edge.to === activeId || upstream.has(edge.to));
+    const inDown = (edge.from === activeId || downstream.has(edge.from)) && (edge.to === activeId || downstream.has(edge.to));
+    if (inUp || inDown) edgeIds.add(edge.id);
+  }
+  return { focusId: activeId, upstream, downstream, edgeIds };
+}
+
+function tfApplyLineageHighlight(canvasEl, edges) {
+  const activeId = taskFlowPrefs.hoveredNodeId || taskFlowPrefs.selectedNodeId;
+  const lineage = tfComputeLineage(activeId, edges);
+  for (const el of canvasEl.querySelectorAll('[data-tf-node-id]')) {
+    const id = el.dataset.tfNodeId;
+    el.classList.toggle('is-selected', id === taskFlowPrefs.selectedNodeId);
+    if (!lineage) {
+      el.classList.remove('is-dimmed', 'is-focus', 'is-upstream', 'is-downstream');
+      continue;
+    }
+    const isFocus = id === lineage.focusId;
+    const isUp = lineage.upstream.has(id);
+    const isDown = lineage.downstream.has(id);
+    el.classList.toggle('is-focus', isFocus);
+    el.classList.toggle('is-upstream', isUp);
+    el.classList.toggle('is-downstream', isDown);
+    el.classList.toggle('is-dimmed', !isFocus && !isUp && !isDown);
+  }
+  for (const el of canvasEl.querySelectorAll('[data-tf-edge-id]')) {
+    const id = el.dataset.tfEdgeId;
+    if (!lineage) {
+      el.classList.remove('is-dimmed', 'is-active');
+      continue;
+    }
+    const active = lineage.edgeIds.has(id);
+    el.classList.toggle('is-active', active);
+    el.classList.toggle('is-dimmed', !active);
+  }
+}
+
+function tfFilterGraph(rawTaskFlow, scopedCompanionsList) {
+  const allNodes = Array.isArray(rawTaskFlow?.nodes) ? rawTaskFlow.nodes : [];
+  const allEdges = Array.isArray(rawTaskFlow?.edges) ? rawTaskFlow.edges : [];
+  const nowMs = Math.max(Number(rawTaskFlow?.observedAt) || 0, Date.now());
+  const windowMs = TASKFLOW_WINDOWS_MS[taskFlowPrefs.window] ?? Infinity;
+  const isScoped = Array.isArray(snapshot.companions) && scopedCompanionsList.length < snapshot.companions.length;
+  const scopedBotIds = new Set(scopedCompanionsList.map((c) => c.id));
+
+  let nodes = allNodes.filter((n) => {
+    if (!n || !n.id) return false;
+    if (isScoped && n.botId && !scopedBotIds.has(n.botId)) return false;
+    if (windowMs === Infinity) return true;
+    if (n.status === 'running' || n.status === 'waiting') return true;
+    const latest = Math.max(n.completedAtMs || 0, n.updatedAtMs || 0, n.startedAtMs || 0, n.createdAtMs || 0);
+    return latest >= nowMs - windowMs;
+  });
+
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  let edges = allEdges.filter((e) => e && e.from && e.to && e.from !== e.to && nodeIds.has(e.from) && nodeIds.has(e.to));
+
+  if (taskFlowPrefs.linkedOnly) {
+    const linkedIds = new Set();
+    for (const e of edges) {
+      linkedIds.add(e.from);
+      linkedIds.add(e.to);
+    }
+    nodes = nodes.filter((n) => linkedIds.has(n.id));
+    edges = edges.filter((e) => linkedIds.has(e.from) && linkedIds.has(e.to));
+  }
+
+  return { nodes, edges, nowMs };
+}
+
+function tfBuildSwimlanes(nodes, edges, folderLookup) {
+  const mode = taskFlowPrefs.lane;
+  if (mode === 'chain') {
+    const parent = new Map(nodes.map((n) => [n.id, n.id]));
+    const find = (x) => {
+      let cur = x;
+      while (parent.get(cur) !== cur) {
+        parent.set(cur, parent.get(parent.get(cur)));
+        cur = parent.get(cur);
+      }
+      return cur;
+    };
+    const union = (a, b) => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent.set(rb, ra);
+    };
+    for (const e of edges) {
+      if (parent.has(e.from) && parent.has(e.to)) union(e.from, e.to);
+    }
+    const groups = new Map();
+    for (const n of nodes) {
+      const root = find(n.id);
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root).push(n);
+    }
+    const lanes = [];
+    for (const [id, list] of groups.entries()) {
+      list.sort((a, b) => (a.startedAtMs ?? a.createdAtMs ?? a.updatedAtMs) - (b.startedAtMs ?? b.createdAtMs ?? b.updatedAtMs));
+      const label = list.length > 1 ? `链路: ${list[0].title}` : `独立: ${list[0].title}`;
+      lanes.push({ id, label, nodes: list });
+    }
+    lanes.sort((a, b) => (b.nodes.length - a.nodes.length) || ((a.nodes[0]?.createdAtMs ?? 0) - (b.nodes[0]?.createdAtMs ?? 0)));
+    return lanes;
+  }
+
+  const groups = new Map();
+  for (const n of nodes) {
+    let key = '__ungrouped__';
+    let label = '未分组伙伴';
+    if (mode === 'device') {
+      key = n.deviceId || '__local__';
+      label = n.deviceName || (key === snapshot.taskFlow?.selfDeviceId ? (snapshot.taskFlow?.selfDeviceName || '本机') : key) || '本机';
+    } else {
+      key = n.folderId || '__ungrouped__';
+      if (Array.isArray(n.folderBreadcrumb) && n.folderBreadcrumb.length) {
+        label = n.folderBreadcrumb.join(' / ');
+      } else if (n.folderId && folderLookup?.get?.(n.folderId)) {
+        label = folderLookup.get(n.folderId).pathLabel || folderLookup.get(n.folderId).name || n.folderId;
+      }
+    }
+    if (!groups.has(key)) groups.set(key, { id: key, label, nodes: [] });
+    groups.get(key).nodes.push(n);
+  }
+  const lanes = Array.from(groups.values());
+  for (const lane of lanes) {
+    lane.nodes.sort((a, b) => (a.startedAtMs ?? a.createdAtMs ?? a.updatedAtMs) - (b.startedAtMs ?? b.createdAtMs ?? b.updatedAtMs));
+  }
+  lanes.sort((a, b) => {
+    if (a.id.startsWith('__') && !b.id.startsWith('__')) return 1;
+    if (!a.id.startsWith('__') && b.id.startsWith('__')) return -1;
+    return a.label.localeCompare(b.label, 'zh-CN');
+  });
+  return lanes;
+}
+
+function tfComputeDagLayout(nodes, edges) {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const inDeg = new Map(nodes.map((n) => [n.id, 0]));
+  const fwd = new Map(nodes.map((n) => [n.id, []]));
+  for (const e of edges) {
+    fwd.get(e.from)?.push(e);
+    inDeg.set(e.to, (inDeg.get(e.to) ?? 0) + 1);
+  }
+  const remaining = new Set(nodes.map((n) => n.id));
+  const topoOrder = [];
+  const brokenBackEdges = new Set();
+
+  while (remaining.size > 0) {
+    const zeros = Array.from(remaining).filter((id) => (inDeg.get(id) ?? 0) === 0);
+    if (zeros.length === 0) {
+      const sortedRest = Array.from(remaining).sort((a, b) =>
+        ((inDeg.get(a) ?? 0) - (inDeg.get(b) ?? 0))
+        || ((byId.get(a)?.createdAtMs ?? 0) - (byId.get(b)?.createdAtMs ?? 0)));
+      zeros.push(sortedRest[0]);
+    } else {
+      zeros.sort((a, b) => (byId.get(a)?.createdAtMs ?? 0) - (byId.get(b)?.createdAtMs ?? 0));
+    }
+    const pick = zeros[0];
+    remaining.delete(pick);
+    topoOrder.push(pick);
+    for (const e of (fwd.get(pick) || [])) {
+      if (!remaining.has(e.to)) {
+        brokenBackEdges.add(e.id);
+        continue;
+      }
+      inDeg.set(e.to, Math.max(0, (inDeg.get(e.to) ?? 1) - 1));
+    }
+  }
+
+  const layer = new Map(topoOrder.map((id) => [id, 0]));
+  for (const id of topoOrder) {
+    const curLayer = layer.get(id) ?? 0;
+    for (const e of (fwd.get(id) || [])) {
+      if (brokenBackEdges.has(e.id)) continue;
+      if ((layer.get(e.to) ?? 0) <= curLayer) {
+        layer.set(e.to, curLayer + 1);
+      }
+    }
+  }
+
+  const cols = new Map();
+  for (const id of topoOrder) {
+    const colIdx = layer.get(id) ?? 0;
+    if (!cols.has(colIdx)) cols.set(colIdx, []);
+    cols.get(colIdx).push(byId.get(id));
+  }
+  const colIndices = Array.from(cols.keys()).sort((a, b) => a - b);
+  return { colIndices, cols, brokenBackEdges };
+}
+
+function tfBindControls() {
+  if (taskFlowControlsBound) return;
+  const controls = document.getElementById('taskflow-controls');
+  if (!controls) return;
+  taskFlowControlsBound = true;
+  controls.addEventListener('click', (event) => {
+    const btn = event.target?.closest?.('button');
+    if (!btn) return;
+    if (btn.dataset.tfView) {
+      taskFlowPrefs.view = btn.dataset.tfView;
+    } else if (btn.dataset.tfLane) {
+      taskFlowPrefs.lane = btn.dataset.tfLane;
+    } else if (btn.dataset.tfWin) {
+      taskFlowPrefs.window = btn.dataset.tfWin;
+    } else if (btn.id === 'taskflow-toggle-steps') {
+      taskFlowPrefs.showSteps = !taskFlowPrefs.showSteps;
+    } else if (btn.id === 'taskflow-toggle-linked') {
+      taskFlowPrefs.linkedOnly = !taskFlowPrefs.linkedOnly;
+    } else {
+      return;
+    }
+    tfSyncControlButtons();
+    renderTaskFlow(scopedCompanions(), buildFolderLookup());
+  });
+}
+
+function tfSyncControlButtons() {
+  const controls = document.getElementById('taskflow-controls');
+  if (!controls) return;
+  for (const btn of controls.querySelectorAll('[data-tf-view]')) {
+    btn.classList.toggle('is-active', btn.dataset.tfView === taskFlowPrefs.view);
+  }
+  for (const btn of controls.querySelectorAll('[data-tf-lane]')) {
+    btn.classList.toggle('is-active', btn.dataset.tfLane === taskFlowPrefs.lane);
+    btn.disabled = taskFlowPrefs.view === 'dag';
+  }
+  for (const btn of controls.querySelectorAll('[data-tf-win]')) {
+    btn.classList.toggle('is-active', btn.dataset.tfWin === taskFlowPrefs.window);
+  }
+  const stepsBtn = document.getElementById('taskflow-toggle-steps');
+  if (stepsBtn) {
+    stepsBtn.classList.toggle('is-active', taskFlowPrefs.showSteps);
+    stepsBtn.setAttribute('aria-pressed', String(taskFlowPrefs.showSteps));
+  }
+  const linkedBtn = document.getElementById('taskflow-toggle-linked');
+  if (linkedBtn) {
+    linkedBtn.classList.toggle('is-active', taskFlowPrefs.linkedOnly);
+    linkedBtn.setAttribute('aria-pressed', String(taskFlowPrefs.linkedOnly));
+  }
+}
+
+function tfFindCompanionForNode(flowNode, companionsList) {
+  if (!flowNode) return null;
+  const all = [
+    ...(Array.isArray(companionsList) ? companionsList : []),
+    ...(Array.isArray(snapshot.companions) ? snapshot.companions : []),
+  ];
+  return all.find((c) => c && ((flowNode.botId && c.id === flowNode.botId) || (flowNode.sessionId && c.sessionId === flowNode.sessionId))) || null;
+}
+
+function tfWireNodeInteractions(el, nodeId, canvasEl, edges) {
+  el.addEventListener('mouseenter', () => {
+    taskFlowPrefs.hoveredNodeId = nodeId;
+    tfApplyLineageHighlight(canvasEl, edges);
+  });
+  el.addEventListener('mouseleave', () => {
+    if (taskFlowPrefs.hoveredNodeId === nodeId) {
+      taskFlowPrefs.hoveredNodeId = null;
+      tfApplyLineageHighlight(canvasEl, edges);
+    }
+  });
+  el.addEventListener('click', (event) => {
+    event.stopPropagation();
+    taskFlowPrefs.selectedNodeId = taskFlowPrefs.selectedNodeId === nodeId ? null : nodeId;
+    renderTaskFlow(scopedCompanions(), buildFolderLookup());
+  });
+}
+
+function tfRenderInspector(container, nodes, edges, nowMs, companionsList) {
+  const selected = nodes.find((n) => n.id === taskFlowPrefs.selectedNodeId);
+  if (!selected) return;
+
+  const box = node('div', 'taskflow-inspector');
+  const head = node('div', 'taskflow-inspector-head');
+  const titleWrap = node('div', 'taskflow-inspector-titlewrap');
+  const statusPill = node('span', 'taskflow-status-pill', tfStatusLabel(selected.status));
+  statusPill.dataset.status = selected.status || 'idle';
+  titleWrap.append(statusPill, node('strong', '', selected.title || selected.id));
+  if (selected.isCrossDevice) {
+    titleWrap.append(node('span', 'taskflow-tag is-cross', '跨电脑'));
+  }
+
+  const actions = node('div', 'taskflow-inspector-actions');
+  const matchedCompanion = tfFindCompanionForNode(selected, companionsList);
+  if (matchedCompanion && typeof showDetails === 'function') {
+    const openBtn = node('button', 'taskflow-action-btn', '查看对应伙伴');
+    openBtn.type = 'button';
+    openBtn.addEventListener('click', () => showDetails(matchedCompanion));
+    actions.append(openBtn);
+  }
+  const closeBtn = node('button', 'taskflow-action-btn is-subtle', '收起详情');
+  closeBtn.type = 'button';
+  closeBtn.addEventListener('click', () => {
+    taskFlowPrefs.selectedNodeId = null;
+    renderTaskFlow(scopedCompanions(), buildFolderLookup());
+  });
+  actions.append(closeBtn);
+  head.append(titleWrap, actions);
+  box.append(head);
+
+  const metaParts = [
+    selected.botName ? `伙伴: ${selected.botName}` : null,
+    selected.deviceName ? `电脑: ${selected.deviceName}` : null,
+    Array.isArray(selected.folderBreadcrumb) && selected.folderBreadcrumb.length
+      ? `分组: ${selected.folderBreadcrumb.join(' / ')}`
+      : null,
+    `开始: ${tfFormatClock(selected.startedAtMs ?? selected.createdAtMs, true)}`,
+    `耗时: ${tfFormatDuration(selected.startedAtMs ?? selected.createdAtMs, selected.completedAtMs, selected.status, nowMs)}`,
+  ].filter(Boolean);
+  box.append(node('p', 'taskflow-inspector-meta', metaParts.join(' · ')));
+
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const upstreamEdges = edges.filter((e) => e.to === selected.id);
+  const downstreamEdges = edges.filter((e) => e.from === selected.id);
+
+  if (upstreamEdges.length || downstreamEdges.length) {
+    const depsRow = node('div', 'taskflow-inspector-deps');
+    const makeRelList = (title, relEdges, pickOtherId) => {
+      const col = node('div', 'taskflow-dep-col');
+      col.append(node('span', 'taskflow-dep-label', `${title} (${relEdges.length})`));
+      const chips = node('div', 'taskflow-dep-chips');
+      if (!relEdges.length) {
+        chips.append(node('span', 'taskflow-empty-inline', '无'));
+      } else {
+        for (const e of relEdges) {
+          const target = nodeMap.get(pickOtherId(e));
+          if (!target) continue;
+          const chip = node('button', 'taskflow-dep-chip', `${target.title} (${tfEdgeLabel(e)})`);
+          chip.type = 'button';
+          chip.addEventListener('click', () => {
+            taskFlowPrefs.selectedNodeId = target.id;
+            renderTaskFlow(scopedCompanions(), buildFolderLookup());
+          });
+          chips.append(chip);
+        }
+      }
+      col.append(chips);
+      return col;
+    };
+    depsRow.append(
+      makeRelList('前置依赖', upstreamEdges, (e) => e.from),
+      makeRelList('下游影响', downstreamEdges, (e) => e.to),
+    );
+    box.append(depsRow);
+  }
+
+  if (Array.isArray(selected.internalSteps) && selected.internalSteps.length) {
+    const stepsWrap = node('div', 'taskflow-inspector-steps');
+    stepsWrap.append(node('div', 'taskflow-dep-label', `内部步骤进度 (${selected.internalSteps.length})`));
+    const list = node('ol', 'taskflow-step-list');
+    for (const step of selected.internalSteps) {
+      const li = node('li', 'taskflow-step-item');
+      li.dataset.status = step.status || 'pending';
+      const stepDot = node('span', 'taskflow-step-dot');
+      const stepTitle = node('span', 'taskflow-step-text', step.content || step.stepId);
+      const stepMeta = [];
+      if (step.owner) stepMeta.push(`@${step.owner}`);
+      if (Array.isArray(step.blockedBy) && step.blockedBy.length) {
+        stepMeta.push(`依赖 ${step.blockedBy.join(', ')}`);
+      }
+      const dur = tfFormatDuration(step.startedAtMs ?? step.createdAtMs, step.completedAtMs, step.status === 'in_progress' ? 'running' : step.status, nowMs);
+      if (dur && dur !== '待开始') stepMeta.push(dur);
+      li.append(stepDot, stepTitle);
+      if (stepMeta.length) li.append(node('span', 'taskflow-step-meta', stepMeta.join(' · ')));
+      list.append(li);
+    }
+    stepsWrap.append(list);
+    box.append(stepsWrap);
+  }
+
+  container.append(box);
+}
+
+function tfRenderGantt(canvasEl, nodes, edges, nowMs, folderLookup) {
+  const windowMs = TASKFLOW_WINDOWS_MS[taskFlowPrefs.window] ?? Infinity;
+  let minMs = Infinity;
+  let maxMs = -Infinity;
+
+  if (windowMs !== Infinity) {
+    maxMs = nowMs;
+    minMs = nowMs - windowMs;
+  } else {
+    for (const n of nodes) {
+      const s = n.startedAtMs ?? n.createdAtMs ?? n.updatedAtMs ?? nowMs;
+      const e = (n.status === 'running' || n.status === 'waiting')
+        ? nowMs
+        : Math.max(s, n.completedAtMs ?? n.updatedAtMs ?? s);
+      if (s < minMs) minMs = s;
+      if (e > maxMs) maxMs = e;
+    }
+    if (!Number.isFinite(minMs) || !Number.isFinite(maxMs)) {
+      minMs = nowMs - 3600 * 1000;
+      maxMs = nowMs;
+    }
+    const pad = Math.max(60 * 1000, Math.round((maxMs - minMs) * 0.04));
+    maxMs += pad;
+  }
+  const spanMs = Math.max(60 * 1000, maxMs - minMs);
+  const withDate = spanMs > 12 * 3600 * 1000;
+  const pctFor = (ms) => Math.max(0, Math.min(100, ((ms - minMs) / spanMs) * 100));
+
+  const ganttWrap = node('div', 'taskflow-gantt');
+
+  // Time axis header
+  const header = node('div', 'taskflow-gantt-header');
+  header.append(node('div', 'taskflow-gantt-labelcol', '分组 / 任务泳道'));
+  const ticksWrap = node('div', 'taskflow-gantt-ticks');
+  for (let i = 0; i <= 4; i++) {
+    const ratio = i / 4;
+    const t = minMs + spanMs * ratio;
+    const tick = node('span', 'taskflow-tick', tfFormatClock(t, withDate));
+    tick.style.left = `${ratio * 100}%`;
+    ticksWrap.append(tick);
+  }
+  if (nowMs >= minMs && nowMs <= maxMs) {
+    const nowTag = node('span', 'taskflow-now-tag', '当前');
+    nowTag.style.left = `${pctFor(nowMs)}%`;
+    ticksWrap.append(nowTag);
+  }
+  header.append(ticksWrap);
+  ganttWrap.append(header);
+
+  const lanes = tfBuildSwimlanes(nodes, edges, folderLookup);
+  const body = node('div', 'taskflow-gantt-body');
+  const laneRowsWrap = node('div', 'taskflow-gantt-lanes');
+  const trackRowPositions = new Map();
+  let trackTotalY = 0;
+
+  const LANE_HEAD_H = 26;
+  const BAR_ROW_H = 42;
+  const STEP_LINE_H = 18;
+
+  for (const lane of lanes) {
+    const laneEl = node('div', 'taskflow-lane');
+    const laneHead = node('div', 'taskflow-lane-head');
+    const activeCnt = lane.nodes.filter((n) => n.status === 'running' || n.status === 'waiting').length;
+    laneHead.append(
+      node('span', 'taskflow-lane-title', lane.label),
+      node('span', 'taskflow-lane-count', activeCnt > 0 ? `${activeCnt} 进行中 / ${lane.nodes.length}` : `${lane.nodes.length} 项`),
+    );
+    laneEl.append(laneHead);
+    trackTotalY += LANE_HEAD_H;
+
+    for (const item of lane.nodes) {
+      const steps = taskFlowPrefs.showSteps && Array.isArray(item.internalSteps) ? item.internalSteps.slice(0, 6) : [];
+      const rowH = BAR_ROW_H + (steps.length ? steps.length * STEP_LINE_H + 6 : 0);
+
+      const row = node('div', 'taskflow-row');
+      row.style.height = `${rowH}px`;
+
+      const rowLabel = node('div', 'taskflow-row-label');
+      rowLabel.dataset.tfNodeId = item.id;
+      const dot = node('span', 'taskflow-dot');
+      dot.dataset.status = item.status || 'idle';
+      const textWrap = node('div', 'taskflow-row-text');
+      const titleSpan = node('span', 'taskflow-row-title', item.title || item.id);
+      const subParts = [item.botName, item.deviceName].filter(Boolean);
+      textWrap.append(titleSpan);
+      if (subParts.length) textWrap.append(node('span', 'taskflow-row-sub', subParts.join(' · ')));
+      rowLabel.append(dot, textWrap);
+      tfWireNodeInteractions(rowLabel, item.id, canvasEl, edges);
+
+      const track = node('div', 'taskflow-row-track');
+      const rawStart = item.startedAtMs ?? item.createdAtMs ?? item.updatedAtMs ?? minMs;
+      const rawEnd = (item.status === 'running' || item.status === 'waiting')
+        ? nowMs
+        : Math.max(rawStart, item.completedAtMs ?? item.updatedAtMs ?? rawStart);
+      const leftPct = pctFor(rawStart);
+      const rightPct = Math.max(leftPct + 1.8, pctFor(rawEnd));
+      const widthPct = Math.min(100 - leftPct, rightPct - leftPct);
+
+      trackRowPositions.set(item.id, {
+        leftPct,
+        rightPct: Math.min(100, leftPct + widthPct),
+        centerY: trackTotalY + BAR_ROW_H / 2,
+      });
+
+      const bar = node('button', 'taskflow-bar');
+      bar.type = 'button';
+      bar.dataset.tfNodeId = item.id;
+      bar.dataset.status = item.status || 'idle';
+      bar.style.left = `${leftPct}%`;
+      bar.style.width = `${widthPct}%`;
+      const durText = tfFormatDuration(rawStart, rawEnd, item.status, nowMs);
+      bar.title = `${item.title} (${tfStatusLabel(item.status)}, ${durText})`;
+      bar.append(node('span', 'taskflow-bar-title', item.title));
+      bar.append(node('span', 'taskflow-bar-dur', durText));
+      if (item.isCrossDevice) bar.append(node('span', 'taskflow-bar-cross', '跨端'));
+      tfWireNodeInteractions(bar, item.id, canvasEl, edges);
+      track.append(bar);
+
+      if (steps.length) {
+        const stepsStrip = node('div', 'taskflow-bar-steps');
+        for (const step of steps) {
+          const stepEl = node('div', 'taskflow-mini-step');
+          stepEl.dataset.status = step.status || 'pending';
+          const sStart = step.startedAtMs ?? step.createdAtMs ?? rawStart;
+          const sEnd = step.status === 'in_progress'
+            ? nowMs
+            : Math.max(sStart, step.completedAtMs ?? step.updatedAtMs ?? sStart);
+          const sLeft = pctFor(sStart);
+          const sWidth = Math.min(100 - sLeft, Math.max(1.2, pctFor(sEnd) - sLeft));
+          const visualWidth = Math.min(100, Math.max(sWidth, 8));
+          const visualLeft = Math.max(0, Math.min(sLeft, 100 - visualWidth));
+          stepEl.style.left = `${visualLeft}%`;
+          stepEl.style.width = `${visualWidth}%`;
+          const stepLabel = step.blockedBy?.length
+            ? `${step.content} (等 ${step.blockedBy.join(',')})`
+            : step.content;
+          stepEl.textContent = stepLabel;
+          stepsStrip.append(stepEl);
+        }
+        track.append(stepsStrip);
+      }
+
+      row.append(rowLabel, track);
+      laneEl.append(row);
+      trackTotalY += rowH;
+    }
+    laneRowsWrap.append(laneEl);
+  }
+
+  // Right-side SVG overlay for Now line + dependency curves (aligned exactly to track column)
+  if (trackTotalY > 0 && (edges.length > 0 || (nowMs >= minMs && nowMs <= maxMs))) {
+    const svgOverlay = node('div', 'taskflow-gantt-svg-layer');
+    const svg = tfSvgEl('svg', {
+      class: 'taskflow-svg',
+      viewBox: `0 0 1000 ${Math.max(1, trackTotalY)}`,
+      preserveAspectRatio: 'none',
+    });
+
+    if (nowMs >= minMs && nowMs <= maxMs) {
+      const nx = pctFor(nowMs) * 10;
+      svg.append(tfSvgEl('line', {
+        x1: nx, y1: 0, x2: nx, y2: trackTotalY,
+        class: 'taskflow-now-line',
+        'vector-effect': 'non-scaling-stroke',
+      }));
+    }
+
+    for (const e of edges) {
+      const a = trackRowPositions.get(e.from);
+      const b = trackRowPositions.get(e.to);
+      if (!a || !b) continue;
+      const x1 = a.rightPct * 10;
+      const y1 = a.centerY;
+      const x2 = b.leftPct * 10;
+      const y2 = b.centerY;
+      const dx = Math.max(24, Math.abs(x2 - x1) * 0.45);
+      const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+      const path = tfSvgEl('path', {
+        d,
+        class: `taskflow-edge${e.isCrossDevice ? ' is-cross' : ''}`,
+        'data-tf-edge-id': e.id,
+        'data-edge-kind': e.kind || 'blocks',
+        'vector-effect': 'non-scaling-stroke',
+      });
+      const tip = tfSvgEl('title');
+      tip.textContent = tfEdgeLabel(e);
+      path.append(tip);
+      svg.append(path);
+    }
+    svgOverlay.append(svg);
+    laneRowsWrap.append(svgOverlay);
+  }
+
+  body.append(laneRowsWrap);
+  ganttWrap.append(body);
+  canvasEl.append(ganttWrap);
+}
+
+function tfRenderDag(canvasEl, nodes, edges, nowMs) {
+  const { colIndices, cols, brokenBackEdges } = tfComputeDagLayout(nodes, edges);
+  const COL_W = 224;
+  const COL_GAP = 64;
+  const ROW_GAP = 14;
+  const PAD = 16;
+
+  const dagScroll = node('div', 'taskflow-dag-scroll');
+  const stage = node('div', 'taskflow-dag-stage');
+  const rects = new Map();
+
+  let maxColHeight = 0;
+  colIndices.forEach((colIdx, visualIdx) => {
+    const colNodes = cols.get(colIdx) || [];
+    let y = PAD;
+    const x = PAD + visualIdx * (COL_W + COL_GAP);
+    for (const item of colNodes) {
+      const stepsCount = taskFlowPrefs.showSteps && Array.isArray(item.internalSteps)
+        ? Math.min(4, item.internalSteps.length)
+        : 0;
+      const h = 76 + (stepsCount ? 12 + stepsCount * 18 : 0);
+      rects.set(item.id, { x, y, w: COL_W, h });
+
+      const card = node('button', 'taskflow-dag-node');
+      card.type = 'button';
+      card.dataset.tfNodeId = item.id;
+      card.dataset.status = item.status || 'idle';
+      card.style.left = `${x}px`;
+      card.style.top = `${y}px`;
+      card.style.width = `${COL_W}px`;
+      card.style.minHeight = `${h}px`;
+
+      const topRow = node('div', 'taskflow-dag-top');
+      const pill = node('span', 'taskflow-status-pill', tfStatusLabel(item.status));
+      pill.dataset.status = item.status || 'idle';
+      topRow.append(pill);
+      if (item.isCrossDevice) topRow.append(node('span', 'taskflow-tag is-cross', '跨端'));
+      const dur = node('span', 'taskflow-dag-dur', tfFormatDuration(item.startedAtMs ?? item.createdAtMs, item.completedAtMs, item.status, nowMs));
+      topRow.append(dur);
+      card.append(topRow);
+
+      card.append(node('div', 'taskflow-dag-title', item.title || item.id));
+      const meta = [item.botName, item.deviceName].filter(Boolean).join(' · ') || '主链路任务';
+      card.append(node('div', 'taskflow-dag-sub', meta));
+
+      if (stepsCount > 0) {
+        const miniList = node('div', 'taskflow-dag-steps');
+        for (const s of item.internalSteps.slice(0, 4)) {
+          const line = node('div', 'taskflow-dag-step', `${s.status === 'completed' ? '✓' : s.status === 'in_progress' ? '▶' : '○'} ${s.content}`);
+          line.dataset.status = s.status || 'pending';
+          miniList.append(line);
+        }
+        card.append(miniList);
+      }
+
+      tfWireNodeInteractions(card, item.id, canvasEl, edges);
+      stage.append(card);
+      y += h + ROW_GAP;
+    }
+    if (y > maxColHeight) maxColHeight = y;
+  });
+
+  const stageW = Math.max(480, PAD * 2 + colIndices.length * COL_W + Math.max(0, colIndices.length - 1) * COL_GAP);
+  const stageH = Math.max(220, maxColHeight + PAD);
+  stage.style.width = `${stageW}px`;
+  stage.style.height = `${stageH}px`;
+
+  const svg = tfSvgEl('svg', {
+    class: 'taskflow-dag-svg',
+    width: stageW,
+    height: stageH,
+    viewBox: `0 0 ${stageW} ${stageH}`,
+  });
+  const defs = tfSvgEl('defs');
+  const marker = tfSvgEl('marker', {
+    id: 'tf-dag-arrow',
+    viewBox: '0 0 10 10',
+    refX: '9',
+    refY: '5',
+    markerWidth: '6',
+    markerHeight: '6',
+    orient: 'auto-start-reverse',
+  });
+  marker.append(tfSvgEl('path', { d: 'M 0 1 L 10 5 L 0 9 z', fill: 'context-stroke' }));
+  defs.append(marker);
+  svg.append(defs);
+
+  for (const e of edges) {
+    const a = rects.get(e.from);
+    const b = rects.get(e.to);
+    if (!a || !b) continue;
+    const isBack = brokenBackEdges.has(e.id) || b.x <= a.x;
+    let d;
+    if (isBack) {
+      const x1 = a.x + a.w / 2;
+      const y1 = a.y;
+      const x2 = b.x + b.w / 2;
+      const y2 = b.y;
+      const arch = Math.max(12, Math.min(y1, y2) - 34);
+      d = `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${arch}, ${x2} ${y2}`;
+    } else {
+      const x1 = a.x + a.w;
+      const y1 = a.y + a.h / 2;
+      const x2 = b.x - 2;
+      const y2 = b.y + b.h / 2;
+      const dx = Math.max(24, (x2 - x1) * 0.45);
+      d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+    }
+    const path = tfSvgEl('path', {
+      d,
+      class: `taskflow-edge${e.isCrossDevice ? ' is-cross' : ''}${isBack ? ' is-back' : ''}`,
+      'data-tf-edge-id': e.id,
+      'data-edge-kind': e.kind || 'blocks',
+      'marker-end': 'url(#tf-dag-arrow)',
+    });
+    const tip = tfSvgEl('title');
+    tip.textContent = tfEdgeLabel(e);
+    path.append(tip);
+    svg.append(path);
+  }
+
+  stage.prepend(svg);
+  dagScroll.append(stage);
+  canvasEl.append(dagScroll);
+}
+
+function renderTaskFlow(companionsList, folderLookup) {
+  tfBindControls();
+  tfSyncControlButtons();
+  const canvas = document.getElementById('taskflow-canvas');
+  const meta = document.getElementById('taskflow-meta');
+  if (!canvas) return;
+  canvas.textContent = '';
+
+  const raw = snapshot.taskFlow;
+  if (!raw && !receivedState) {
+    canvas.append(node('p', 'empty', '正在汇总任务依赖与时间推进数据…'));
+    return;
+  }
+
+  const { nodes, edges, nowMs } = tfFilterGraph(raw, companionsList);
+  const runningCount = nodes.filter((n) => n.status === 'running' || n.status === 'waiting').length;
+  const crossCount = nodes.filter((n) => n.isCrossDevice).length + edges.filter((e) => e.isCrossDevice).length;
+  if (meta) {
+    const parts = [
+      `任务节点 ${nodes.length}`,
+      `依赖边 ${edges.length}`,
+      `活跃 ${runningCount}`,
+    ];
+    if (crossCount > 0) parts.push(`跨电脑交互 ${crossCount}`);
+    if (raw?.hiddenScheduledCount > 0) parts.push(`已折叠 ${raw.hiddenScheduledCount} 项空闲定时任务`);
+    meta.textContent = parts.join(' · ');
+  }
+
+  if (taskFlowPrefs.selectedNodeId && !nodes.some((n) => n.id === taskFlowPrefs.selectedNodeId)) {
+    taskFlowPrefs.selectedNodeId = null;
+  }
+
+  if (!nodes.length) {
+    canvas.append(node('p', 'empty', '当前筛选条件下暂无任务依赖或时间推进记录。可在助手中启动多伙伴委派、跨电脑协作或拆解子任务后再查看。'));
+    return;
+  }
+
+  if (taskFlowPrefs.view === 'dag') {
+    tfRenderDag(canvas, nodes, edges, nowMs);
+  } else {
+    tfRenderGantt(canvas, nodes, edges, nowMs, folderLookup);
+  }
+
+  tfRenderInspector(canvas, nodes, edges, nowMs, companionsList);
+  tfApplyLineageHighlight(canvas, edges);
+}
 let selectedCompanion = null;
 let pendingDetailId = null;
 let pendingOpenId = null;
@@ -554,6 +1408,7 @@ function render() {
   renderSummary(companions);
   renderFilters(companions);
   renderRoster(companions, folderLookup);
+  renderTaskFlow(companions, folderLookup);
   renderVerification();
   renderDevices();
   if (focusFilter) elements.filters.querySelector(`[data-filter="${CSS.escape(focusFilter)}"]`)?.focus({ preventScroll: true });
@@ -611,6 +1466,7 @@ channel.addEventListener('message', ({ data }) => {
       companions: Array.isArray(data.companions) ? data.companions : [],
       folders: Array.isArray(data.folders) ? data.folders : (Array.isArray(data.hierarchy?.folders) ? data.hierarchy.folders : []),
       hierarchy: data.hierarchy || null,
+      taskFlow: data.taskFlow && typeof data.taskFlow === 'object' ? data.taskFlow : null,
       verification: data.verification,
       devices: data.devices,
       run: data.run,

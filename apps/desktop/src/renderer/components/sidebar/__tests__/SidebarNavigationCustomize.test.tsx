@@ -70,8 +70,8 @@ vi.mock('react-i18next', () => ({
 }));
 
 const defaults = () => ({
-  order: ['automations', 'plugins', 'search'] as const,
-  visible: ['automations', 'plugins', 'search'] as const,
+  order: ['automations', 'taskFlow', 'plugins', 'search'] as const,
+  visible: ['automations', 'taskFlow', 'plugins', 'search'] as const,
 });
 
 beforeEach(() => {
@@ -100,20 +100,22 @@ describe('sidebar navigation customization', () => {
     render(<SidebarNavigationCustomize onDone={() => {}} />);
     // Rows drag from anywhere except the checkbox, which stays a plain toggle.
     expect(sortableMock.props?.filter).toBe("[role='checkbox']");
-    act(() => sortableMock.props!.onReorder(['plugins', 'search', 'automations']));
+    act(() => sortableMock.props!.onReorder(['plugins', 'search', 'taskFlow', 'automations']));
     expect(order()).toEqual([
       'sidebar.navigation.items.plugins',
       'sidebar.navigation.items.search',
+      'sidebar.navigation.items.taskFlow',
       'sidebar.navigation.items.automations',
     ]);
     fireEvent.click(screen.getByRole('button', { name: 'sidebar.navigation.customize.done' }));
     expect(getSidebarNavigationPrefs(OWNER).order).toEqual([
       'plugins',
       'search',
+      'taskFlow',
       'automations',
     ]);
     expect(JSON.parse(localStorage.getItem(PREFS_KEY)!)).toEqual({
-      order: ['plugins', 'search', 'automations'],
+      order: ['plugins', 'search', 'taskFlow', 'automations'],
     });
   });
 
@@ -130,10 +132,10 @@ describe('sidebar navigation customization', () => {
         visible: ['plugins', 'search'],
       }),
     );
-    expect(order()[0]).toBe('sidebar.navigation.items.plugins');
+    expect(order()[1]).toBe('sidebar.navigation.items.plugins');
     fireEvent.click(screen.getByRole('button', { name: 'sidebar.navigation.customize.done' }));
     expect(getSidebarNavigationPrefs(OWNER)).toEqual({
-      order: ['plugins', 'automations', 'search'],
+      order: ['automations', 'plugins', 'taskFlow', 'search'],
       visible: ['plugins'],
       appsAtTop: [],
     });
@@ -176,8 +178,8 @@ describe('sidebar navigation customization', () => {
     );
     act(() => window.dispatchEvent(new StorageEvent('storage', { key: PREFS_KEY })));
     expect(getSidebarNavigationPrefs(OWNER)).toEqual({
-      order: ['plugins', 'automations', 'search'],
-      visible: ['automations', 'search'],
+      order: ['plugins', 'automations', 'taskFlow', 'search'],
+      visible: ['automations', 'taskFlow', 'search'],
       appsAtTop: [],
     });
     render(<SidebarNavigationCustomize onDone={() => {}} />);
@@ -187,7 +189,7 @@ describe('sidebar navigation customization', () => {
 
   it('keeps edits made after choosing reset', () => {
     setSidebarNavigationPrefs(OWNER, {
-      order: ['plugins', 'automations', 'search'],
+      order: ['plugins', 'automations', 'taskFlow', 'search'],
       visible: ['plugins'],
     });
     render(<SidebarNavigationCustomize onDone={() => {}} />);
@@ -196,7 +198,7 @@ describe('sidebar navigation customization', () => {
     fireEvent.click(screen.getByRole('button', { name: 'sidebar.navigation.customize.done' }));
     expect(getSidebarNavigationPrefs(OWNER)).toEqual({
       order: [...defaults().order],
-      visible: ['automations', 'plugins'],
+      visible: ['automations', 'taskFlow', 'plugins'],
       appsAtTop: [],
     });
   });
@@ -204,13 +206,14 @@ describe('sidebar navigation customization', () => {
     mainViewsMock.routeCapable = [SITES];
     mainViewsMock.sidebarVisible = [SITES];
     setSidebarNavigationPrefs(OWNER, {
-      order: ['automations', 'plugins', 'search'],
-      visible: ['automations', 'plugins', 'search'],
+      order: ['automations', 'taskFlow', 'plugins', 'search'],
+      visible: ['automations', 'taskFlow', 'plugins', 'search'],
       appsAtTop: ['app:xd-sites'],
     });
     render(<SidebarNavigationCustomize onDone={() => {}} />);
     expect(order()).toEqual([
       'sidebar.navigation.items.automations',
+      'sidebar.navigation.items.taskFlow',
       'sidebar.navigation.items.plugins',
       'sidebar.navigation.items.search',
       '站点',
@@ -229,6 +232,7 @@ describe('sidebar navigation customization', () => {
     expect(getSidebarNavigationPrefs(OWNER).appsAtTop).toEqual([]);
     expect(getSidebarNavigationPrefs(OWNER).order).toEqual([
       'automations',
+      'taskFlow',
       'plugins',
       'app:xd-sites',
       'search',
@@ -285,7 +289,7 @@ describe('sidebar navigation customization', () => {
     mainViewsMock.routeCapable = [SITES, off];
     mainViewsMock.sidebarVisible = [SITES];
     setSidebarNavigationPrefs(OWNER, {
-      order: ['app:xd-sites', 'automations', 'plugins', 'search'],
+      order: ['app:xd-sites', 'automations', 'taskFlow', 'plugins', 'search'],
       visible: ['automations', 'plugins'],
       appsAtTop: ['app:xd-sites', 'app:off'],
     });
@@ -299,8 +303,8 @@ describe('sidebar navigation customization', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'sidebar.navigation.customize.done' }));
     expect(getSidebarNavigationPrefs(OWNER)).toEqual({
-      order: ['automations', 'plugins', 'search'],
-      visible: ['automations', 'plugins', 'search'],
+      order: ['automations', 'taskFlow', 'plugins', 'search'],
+      visible: ['automations', 'taskFlow', 'plugins', 'search'],
       appsAtTop: [],
     });
     // No overrides remain, so later product defaults keep applying.
@@ -342,6 +346,9 @@ describe('sidebar navigation customization', () => {
     expect(
       rowOf('sidebar.navigation.items.automations').querySelector('.lucide-timer'),
     ).not.toBeNull();
+    expect(
+      rowOf('sidebar.navigation.items.taskFlow').querySelector('.lucide-git-branch'),
+    ).not.toBeNull();
     expect(rowOf('sidebar.navigation.items.plugins').querySelector('.lucide-plug')).not.toBeNull();
     // Teammates are a sidebar section of their own now, not a customizable entry.
     expect(screen.queryByRole('checkbox', { name: 'sidebar.navigation.items.bots' })).toBeNull();
@@ -350,7 +357,7 @@ describe('sidebar navigation customization', () => {
   });
   it('keeps a separate layout for each account', () => {
     setSidebarNavigationPrefs(OWNER, {
-      order: ['search', 'automations', 'plugins'],
+      order: ['search', 'automations', 'taskFlow', 'plugins'],
       visible: ['search'],
     });
     expect(getSidebarNavigationPrefs('owner-2')).toEqual({
@@ -369,17 +376,18 @@ describe('sidebar navigation customization', () => {
   it('keeps a switched-off plugin at its place when other entries are reordered', () => {
     mainViewsMock.routeCapable = [SITES];
     setSidebarNavigationPrefs(OWNER, {
-      order: ['automations', 'app:xd-sites', 'plugins', 'search'],
-      visible: ['automations', 'plugins', 'search'],
+      order: ['automations', 'app:xd-sites', 'taskFlow', 'plugins', 'search'],
+      visible: ['automations', 'taskFlow', 'plugins', 'search'],
     });
     render(<SidebarNavigationCustomize onDone={() => {}} />);
     expect(order()).not.toContain('站点');
-    act(() => sortableMock.props!.onReorder(['plugins', 'automations', 'search']));
+    act(() => sortableMock.props!.onReorder(['plugins', 'automations', 'taskFlow', 'search']));
     fireEvent.click(screen.getByRole('button', { name: 'sidebar.navigation.customize.done' }));
     expect(getSidebarNavigationPrefs(OWNER).order).toEqual([
       'plugins',
       'automations',
       'app:xd-sites',
+      'taskFlow',
       'search',
     ]);
   });
@@ -388,8 +396,8 @@ describe('sidebar navigation customization', () => {
     mainViewsMock.routeCapable = [SITES];
     mainViewsMock.sidebarVisible = [SITES];
     setSidebarNavigationPrefs(OWNER, {
-      order: ['app:xd-sites', 'automations', 'plugins', 'search'],
-      visible: ['automations', 'plugins', 'search'],
+      order: ['app:xd-sites', 'automations', 'taskFlow', 'plugins', 'search'],
+      visible: ['automations', 'taskFlow', 'plugins', 'search'],
     });
     const view = render(<SidebarNavigationCustomize onDone={() => {}} />);
     mainViewsMock.sidebarVisible = [];
@@ -399,6 +407,7 @@ describe('sidebar navigation customization', () => {
     expect(getSidebarNavigationPrefs(OWNER).order).toEqual([
       'app:xd-sites',
       'automations',
+      'taskFlow',
       'plugins',
       'search',
     ]);
@@ -406,16 +415,17 @@ describe('sidebar navigation customization', () => {
 
   it('keeps a reorder made after choosing reset', () => {
     setSidebarNavigationPrefs(OWNER, {
-      order: ['search', 'plugins', 'automations'],
+      order: ['search', 'plugins', 'taskFlow', 'automations'],
       visible: ['search'],
     });
     render(<SidebarNavigationCustomize onDone={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: 'sidebar.navigation.customize.reset' }));
-    act(() => sortableMock.props!.onReorder(['plugins', 'automations', 'search']));
+    act(() => sortableMock.props!.onReorder(['plugins', 'automations', 'taskFlow', 'search']));
     fireEvent.click(screen.getByRole('button', { name: 'sidebar.navigation.customize.done' }));
     expect(getSidebarNavigationPrefs(OWNER).order).toEqual([
       'plugins',
       'automations',
+      'taskFlow',
       'search',
     ]);
   });

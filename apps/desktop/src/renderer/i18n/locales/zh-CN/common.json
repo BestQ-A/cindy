@@ -10307,7 +10307,14 @@
       "back": "返回",
       "progressSummary": "{{done}}/{{total}} Agent",
       "tokens": "{{value}} tokens",
-      "noProgress": "暂无进度详情"
+      "noProgress": "暂无进度详情",
+      "viewSwitcher": "后台任务视图切换",
+      "viewList": "列表",
+      "viewTimeline": "时间线 & 依赖",
+      "timelineWindow": "时间跨度",
+      "planStepsSection": "当前计划依赖步骤",
+      "executionTimeline": "后台任务执行时间线",
+      "untitledTask": "后台任务"
     },
     "resourceUsage": {
       "sections": {
@@ -10521,7 +10528,8 @@
         "automations": "自动化",
         "plugins": "插件",
         "bots": "伙伴",
-        "search": "搜索"
+        "search": "搜索",
+        "taskFlow": "任务脉络"
       }
     },
     "user": {
@@ -13549,7 +13557,16 @@
     },
     "planPill": {
       "step": "第 {{current}} / {{total}} 步",
-      "dismiss": "关闭计划"
+      "dismiss": "关闭计划",
+      "viewTabs": "计划视图切换",
+      "modeList": "清单",
+      "modeGantt": "时间轴",
+      "modeDag": "依赖图",
+      "ganttTimeAxis": "按实际状态推进时间分布",
+      "ganttStageAxis": "按阶段依赖与顺序推进",
+      "dagNoExplicitEdges": "未声明前置 blockedBy 依赖，以下步骤处于同级可执行阶段",
+      "dagStage": "阶段 {{index}}",
+      "blockedByPrefix": "前置"
     },
     "forkOrigin": {
       "label": "基于原任务创建"
@@ -14815,7 +14832,8 @@
       "backToAutomations": "返回 Automations",
       "backToReviewSource": "返回来源任务",
       "waitForReply": "等待你在文档区回复…",
-      "modelSwitchedFastModeOff": "已切换模型，Fast Mode 已关闭"
+      "modelSwitchedFastModeOff": "已切换模型，Fast Mode 已关闭",
+      "taskFlow": "任务脉络"
     },
     "remoteDesktopConfirmation": {
       "title": "需要在远程电脑上确认",
@@ -20410,6 +20428,94 @@
     },
     "switchOffer": {
       "action": "换到 {{model}} 继续"
+    }
+  },
+  "taskFlow": {
+    "title": "任务脉络",
+    "subtitle": "全局查看伙伴、跨电脑会话与任务步骤之间的依赖流向和实时时间推进",
+    "viewSwitcher": "任务脉络视图切换",
+    "refresh": "刷新",
+    "searchPlaceholder": "搜索任务、伙伴、电脑或分组…",
+    "filterStatusLabel": "按状态筛选",
+    "localDevice": "本机电脑",
+    "empty": "当前筛选条件下暂无任务轨迹。",
+    "views": {
+      "gantt": "甘特时间轴",
+      "dag": "依赖拓扑图"
+    },
+    "kpi": {
+      "totalNodes": "总任务节点",
+      "runningNodes": "进行中",
+      "totalEdges": "依赖与交接连线",
+      "crossDeviceEdges": "跨电脑协同"
+    },
+    "statusFilter": {
+      "all": "全部状态"
+    },
+    "toggles": {
+      "expandSteps": "展开内部步骤",
+      "onlyDependencies": "仅看有依赖链路",
+      "includeScheduled": "包含定时巡检 ({{count}})"
+    },
+    "groupBy": {
+      "label": "泳道分组",
+      "hierarchy": "按分组层级",
+      "computer": "按电脑",
+      "chain": "按任务链路"
+    },
+    "window": {
+      "label": "时间范围",
+      "1h": "1 小时",
+      "6h": "6 小时",
+      "24h": "24 小时",
+      "7d": "7 天",
+      "all": "全部"
+    },
+    "columns": {
+      "taskItem": "任务项 / 伙伴",
+      "count": "{{count}} 项"
+    },
+    "status": {
+      "running": "进行中",
+      "waiting": "等待中",
+      "completed": "已完成",
+      "failed": "失败",
+      "paused": "已暂停",
+      "idle": "空闲"
+    },
+    "nodeKind": {
+      "companion": "伙伴",
+      "session": "任务会话",
+      "subagent": "子代理",
+      "orca_worker": "协作执行体",
+      "group_step": "群聊协同步骤",
+      "plan_step": "计划步骤"
+    },
+    "edgeKind": {
+      "created_task": "发起任务",
+      "delegated": "委派执行",
+      "forked": "分叉衍生",
+      "handoff": "跨会话交接",
+      "reported": "结果回传",
+      "orca_dispatch": "团队派发",
+      "subagent_spawn": "拉起子代理",
+      "blocked_by": "前置阻塞依赖"
+    },
+    "inspector": {
+      "title": "任务节点详情",
+      "close": "关闭详情",
+      "openSession": "在 Cindy 中打开",
+      "computer": "所在电脑",
+      "folder": "伙伴分组",
+      "createdAt": "创建时间",
+      "startedAt": "开始执行",
+      "completedAt": "完成时间",
+      "elapsed": "累计耗时",
+      "upstream": "上游依赖 / 来源 ({{count}})",
+      "noUpstream": "无上游前置任务",
+      "downstream": "下游推进 / 后续 ({{count}})",
+      "noDownstream": "暂无下游派生任务",
+      "internalSteps": "内部计划步骤 ({{count}})"
     }
   }
 }

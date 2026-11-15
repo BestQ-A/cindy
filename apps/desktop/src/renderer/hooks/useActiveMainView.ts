@@ -72,12 +72,14 @@ export function useActiveMainView() {
     ) return;
     if (matchedKey) {
       history.current.lastMatchedKey = matchedKey;
-      // Automations share the task layout, but are not a task destination.
+      // Automations and Task Flow share the task layout, but are not a task destination.
       // Keep the previous task (or the index fallback) for return navigation.
-      const isAutomations =
+      const isAuxiliaryTaskPage =
         location.pathname === '/cc-agent/scheduled' ||
-        location.pathname.startsWith('/cc-agent/scheduled/');
-      if (!isAutomations) {
+        location.pathname.startsWith('/cc-agent/scheduled/') ||
+        location.pathname === '/cc-agent/task-flow' ||
+        location.pathname.startsWith('/cc-agent/task-flow/');
+      if (!isAuxiliaryTaskPage) {
         const isBotCreation =
           location.pathname === '/bots/roster' || location.pathname === '/bots/roster/';
         history.current.paths[matchedKey] = isBotCreation

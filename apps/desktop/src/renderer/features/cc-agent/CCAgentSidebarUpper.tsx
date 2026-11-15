@@ -962,6 +962,7 @@ function ExpandedView({
   // 自动化任务本身仍在顶部 Automations 入口管理；自动化任务 fire 后创建出的
   // session 是普通会话,按 project/dialogue 与普通排序/红点逻辑进入 sidebar。
   const onScheduleMatch = useMatch('/cc-agent/scheduled');
+  const onTaskFlowMatch = useMatch('/cc-agent/task-flow');
   // SidebarTopNav 的“+ New”导航到 /cc-agent/new,而本组件跨 draft 路由常驻挂载,
   // 它不像项目内/对话内新建那样先清选择;据此在落到新建页时清掉残留的批量选择,
   // 避免批量操作条停留在 new-maker 屏上(PR #246 review)。对齐下方 onScheduleMatch 清理。
@@ -2481,8 +2482,8 @@ function ExpandedView({
   }, []);
 
   useEffect(() => {
-    if (onScheduleMatch || onNewMakerMatch) handleClearSelection();
-  }, [onScheduleMatch, onNewMakerMatch, handleClearSelection]);
+    if (onScheduleMatch || onTaskFlowMatch || onNewMakerMatch) handleClearSelection();
+  }, [onScheduleMatch, onTaskFlowMatch, onNewMakerMatch, handleClearSelection]);
 
 
   // 远程会话的已读回执有两类首发即失的场景,都靠本 memo 的 key 变化驱动重跑补发:

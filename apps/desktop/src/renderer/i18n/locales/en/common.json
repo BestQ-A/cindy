@@ -10350,7 +10350,14 @@
       "back": "Back",
       "progressSummary": "{{done}}/{{total}} agents",
       "tokens": "{{value}} tokens",
-      "noProgress": "No progress details yet"
+      "noProgress": "No progress details yet",
+      "viewSwitcher": "Background tasks view switcher",
+      "viewList": "List",
+      "viewTimeline": "Timeline & Deps",
+      "timelineWindow": "Time Span",
+      "planStepsSection": "Current Plan Dependencies",
+      "executionTimeline": "Background Execution Timeline",
+      "untitledTask": "Background Task"
     },
     "resourceUsage": {
       "sections": {
@@ -10564,7 +10571,8 @@
         "automations": "Automations",
         "plugins": "Plugins",
         "bots": "Buddies",
-        "search": "Search"
+        "search": "Search",
+        "taskFlow": "Task Flow"
       }
     },
     "user": {
@@ -13602,7 +13610,16 @@
     },
     "planPill": {
       "step": "Step {{current}} of {{total}}",
-      "dismiss": "Close Plan"
+      "dismiss": "Close Plan",
+      "viewTabs": "Plan view switcher",
+      "modeList": "List",
+      "modeGantt": "Timeline",
+      "modeDag": "Dependencies",
+      "ganttTimeAxis": "Timeline by execution progression",
+      "ganttStageAxis": "Ordered by step dependencies",
+      "dagNoExplicitEdges": "No explicit blockedBy prerequisites; steps below can run in parallel stages.",
+      "dagStage": "Stage {{index}}",
+      "blockedByPrefix": "Blocked by"
     },
     "forkOrigin": {
       "label": "Created from another session"
@@ -14881,7 +14898,8 @@
       "backToAutomations": "Back to Automations",
       "backToReviewSource": "Back to source task",
       "waitForReply": "Waiting for your reply in the document area…",
-      "modelSwitchedFastModeOff": "Model switched, Fast Mode disabled"
+      "modelSwitchedFastModeOff": "Model switched, Fast Mode disabled",
+      "taskFlow": "Task Flow"
     },
     "remoteDesktopConfirmation": {
       "title": "Confirmation required on the remote computer",
@@ -20483,6 +20501,94 @@
     },
     "switchOffer": {
       "action": "Continue with {{model}}"
+    }
+  },
+  "taskFlow": {
+    "title": "Task Flow",
+    "subtitle": "Global view of task dependencies, cross-device handoffs, and live timeline progression",
+    "viewSwitcher": "Task flow view switcher",
+    "refresh": "Refresh",
+    "searchPlaceholder": "Search tasks, companions, computers, or folders…",
+    "filterStatusLabel": "Filter by status",
+    "localDevice": "Local Computer",
+    "empty": "No task flow items match the current filters.",
+    "views": {
+      "gantt": "Gantt Timeline",
+      "dag": "Dependency DAG"
+    },
+    "kpi": {
+      "totalNodes": "Total Nodes",
+      "runningNodes": "Running",
+      "totalEdges": "Dependency Edges",
+      "crossDeviceEdges": "Cross-Device"
+    },
+    "statusFilter": {
+      "all": "All Statuses"
+    },
+    "toggles": {
+      "expandSteps": "Expand Plan Steps",
+      "onlyDependencies": "Linked Chains Only",
+      "includeScheduled": "Include Scheduled ({{count}})"
+    },
+    "groupBy": {
+      "label": "Swimlanes",
+      "hierarchy": "By Hierarchy",
+      "computer": "By Computer",
+      "chain": "By Task Chain"
+    },
+    "window": {
+      "label": "Window",
+      "1h": "1h",
+      "6h": "6h",
+      "24h": "24h",
+      "7d": "7d",
+      "all": "All"
+    },
+    "columns": {
+      "taskItem": "Task / Companion",
+      "count": "{{count}} items"
+    },
+    "status": {
+      "running": "Running",
+      "waiting": "Waiting",
+      "completed": "Completed",
+      "failed": "Failed",
+      "paused": "Paused",
+      "idle": "Idle"
+    },
+    "nodeKind": {
+      "companion": "Companion",
+      "session": "Session",
+      "subagent": "Subagent",
+      "orca_worker": "Team Worker",
+      "group_step": "Group Step",
+      "plan_step": "Plan Step"
+    },
+    "edgeKind": {
+      "created_task": "Created Task",
+      "delegated": "Delegated",
+      "forked": "Forked",
+      "handoff": "Handoff",
+      "reported": "Reported Back",
+      "orca_dispatch": "Team Dispatch",
+      "subagent_spawn": "Spawned Subagent",
+      "blocked_by": "Blocked By"
+    },
+    "inspector": {
+      "title": "Task Node Details",
+      "close": "Close details",
+      "openSession": "Open in Cindy",
+      "computer": "Computer",
+      "folder": "Folder",
+      "createdAt": "Created",
+      "startedAt": "Started",
+      "completedAt": "Completed",
+      "elapsed": "Elapsed",
+      "upstream": "Upstream Dependencies ({{count}})",
+      "noUpstream": "No upstream dependencies",
+      "downstream": "Downstream Dependents ({{count}})",
+      "noDownstream": "No downstream tasks yet",
+      "internalSteps": "Internal Plan Steps ({{count}})"
     }
   }
 }

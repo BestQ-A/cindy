@@ -106,6 +106,12 @@ export const router = createHashRouter([
                         lazy: () => import('@/features/scheduler').then(({ SchedulerPage }) => ({ Component: SchedulerPage })),
                         HydrateFallback: EmptyRouteFallback,
                       },
+                      // Task Flow — 全局任务依赖与时间推进（与 scheduled 同一层级，必须在 :sessionId 之前）
+                      {
+                        path: 'task-flow',
+                        lazy: () => import('@/features/task-flow').then(({ TaskFlowPage }) => ({ Component: TaskFlowPage })),
+                        HydrateFallback: EmptyRouteFallback,
+                      },
                       // Workdir File Browser — 文件树视图(vscode-style),sidebar 自动 swap。
                       // 静态段 'files' 必须在 :sessionId 之前匹配。
                       {

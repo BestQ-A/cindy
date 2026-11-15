@@ -67,7 +67,12 @@ import {
 } from '@/lib/makerTransport';
 import { formatCompactTokens } from '@/lib/usageFormat';
 import type { Message } from '@/lib/ccAgent.types';
+import {
+  extractSessionPlanSteps,
+  type MessageRenderSourceMessageLike,
+} from '@cindy/maker-shared/message-render';
 import type { WorkflowProgress } from '../../../../../shared/workflow-progress';
+import { BackgroundTasksTimelineView } from './BackgroundTasksTimelineView';
 import type { TabKindHostContext } from '../../types';
 import type { BackgroundTasksState } from './index';
 import { listSessionTasks, type SessionTaskItem } from './listSessionTasks';
@@ -712,6 +717,14 @@ export function BackgroundTasksBody({
 
   // 详情选中:存 item.key(跨状态翻转稳定);列表条目消失时若无合成兜底则回列表。
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [sidebarViewMode, setSidebarViewMode] = useState<'list' | 'timeline'>('list');
+  const sessionPlans = useMemo(
+    () =>
+      extractSessionPlanSteps(
+        inputs.messages as unknown as readonly MessageRenderSourceMessageLike[],
+      ),
+    [inputs.messages],
+  );
   // focus 未命中时的合成详情兜底(独立侧栏窗口只加载最新 50 条消息,老 workflow
   // 的 toolCall 不在窗口内 → 列表产不出行,但 wf 文件读取只需 taskId)。key 与
   // 真行同为 taskId:列表稍后真的出现该行时 find 顺序自动切到真行。
@@ -773,7 +786,7 @@ export function BackgroundTasksBody({
     );
   }
 
-  if (runningResolved.length === 0 && completedResolved.length === 0) {
+  if (runningResolved.length === 0 && completedResolved.length === 0 && sessionPlans.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
         <ListTodo size={20} className="text-[var(--text-tertiary)]" aria-hidden="true" />
@@ -784,33 +797,97 @@ export function BackgroundTasksBody({
     );
   }
 
+  const effectiveViewMode =
+    runningResolved.length === 0 && completedResolved.length === 0 && sessionPlans.length > 0
+      ? 'timeline'
+      : sidebarViewMode;
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-      {runningResolved.length > 0 && (
-        <>
-          <SectionHeader label={t('rightSidebar.backgroundTasks.running')} />
-          {runningResolved.map((item) => (
-            <TaskRow
-              key={item.key}
-              item={item}
-              sessionId={sessionId}
-              onOpenWorkflow={handleOpenWorkflow}
-            />
-          ))}
-        </>
-      )}
-      {completedResolved.length > 0 && (
-        <>
-          <SectionHeader label={t('rightSidebar.backgroundTasks.completed')} />
-          {completedResolved.map((item) => (
-            <TaskRow
-              key={item.key}
-              item={item}
-              sessionId={sessionId}
-              onOpenWorkflow={handleOpenWorkflow}
-            />
-          ))}
-        </>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-default)] px-2 py-1.5">
+        <div
+          role="tablist"
+          aria-label={t('rightSidebar.backgroundTasks.viewSwitcher', {
+            defaultValue: '后台任务视图',
+          })}
+          className="inline-flex items-center gap-0.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--surface-chip)] p-0.5"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={effectiveViewMode === 'list'}
+            onClick={() => setSidebarViewMode('list')}
+            className={cn(
+              'cursor-pointer rounded px-2 py-0.5 text-11 transition-colors',
+              effectiveViewMode === 'list'
+                ? 'bg-[var(--surface-hover)] font-medium text-[var(--text-primary)]'
+                : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]',
+            )}
+          >
+            {t('rightSidebar.backgroundTasks.viewList', { defaultValue: '列表' })}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={effectiveViewMode === 'timeline'}
+            onClick={() => setSidebarViewMode('timeline')}
+            className={cn(
+              'cursor-pointer rounded px-2 py-0.5 text-11 transition-colors',
+              effectiveViewMode === 'timeline'
+                ? 'bg-[var(--surface-hover)] font-medium text-[var(--text-primary)]'
+                : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]',
+            )}
+          >
+            {t('rightSidebar.backgroundTasks.viewTimeline', { defaultValue: '时间线 & 依赖' })}
+          </button>
+        </div>
+        {sessionPlans.length > 0 && (
+          <span className="text-[11px] font-mono tabular-nums text-[var(--text-tertiary)]">
+            {sessionPlans[sessionPlans.length - 1].steps.filter((s) => s.status === 'completed').length}/
+            {sessionPlans[sessionPlans.length - 1].steps.length}
+          </span>
+        )}
+      </div>
+
+      {effectiveViewMode === 'timeline' ? (
+        <BackgroundTasksTimelineView
+          running={runningResolved}
+          completed={completedResolved}
+          plans={sessionPlans}
+          messages={inputs.messages}
+          isStreaming={inputs.isStreaming}
+          sessionId={sessionId}
+          onOpenWorkflow={handleOpenWorkflow}
+        />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
+          {runningResolved.length > 0 && (
+            <>
+              <SectionHeader label={t('rightSidebar.backgroundTasks.running')} />
+              {runningResolved.map((item) => (
+                <TaskRow
+                  key={item.key}
+                  item={item}
+                  sessionId={sessionId}
+                  onOpenWorkflow={handleOpenWorkflow}
+                />
+              ))}
+            </>
+          )}
+          {completedResolved.length > 0 && (
+            <>
+              <SectionHeader label={t('rightSidebar.backgroundTasks.completed')} />
+              {completedResolved.map((item) => (
+                <TaskRow
+                  key={item.key}
+                  item={item}
+                  sessionId={sessionId}
+                  onOpenWorkflow={handleOpenWorkflow}
+                />
+              ))}
+            </>
+          )}
+        </div>
       )}
     </div>
   );

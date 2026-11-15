@@ -2020,6 +2020,8 @@ export function buildRenderItems(
             type: 'agent_plan',
             key: insertion.key,
             todos: insertion.todos,
+            ...(insertion.steps ? { steps: insertion.steps } : {}),
+            ...(insertion.startedAtMs !== undefined ? { startedAtMs: insertion.startedAtMs } : {}),
             sourceClientIds: insertion.sourceClientIds,
             createdAt: msg.createdAt,
           });
@@ -6597,6 +6599,8 @@ export function MessageStream({
                         >
                           <InlinePlanCard
                             todos={item.todos}
+                            steps={item.steps}
+                            startedAtMs={item.startedAtMs}
                             animated={
                               isSessionStreaming &&
                               latestInlinePlanBelongsToActiveTurn &&

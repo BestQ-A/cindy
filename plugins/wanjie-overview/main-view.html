@@ -33,6 +33,34 @@
       <div class="filters" id="filters" aria-label="运行状态筛选"></div>
       <div id="roster" class="roster" aria-live="polite"><p class="empty">正在读取伙伴状态…</p></div>
     </section>
+    <section class="taskflow-section" aria-labelledby="taskflow-title">
+      <div class="taskflow-header">
+        <div>
+          <h2 id="taskflow-title">任务依赖与时间推进</h2>
+          <p class="taskflow-meta" id="taskflow-meta">展示跨伙伴、跨电脑任务的上下游依赖关系与时间推进轨迹</p>
+        </div>
+        <div class="taskflow-controls" id="taskflow-controls" aria-label="任务脉络视图控制">
+          <div class="taskflow-segmented" role="group" aria-label="视图模式">
+            <button type="button" class="taskflow-tab is-active" data-tf-view="gantt">甘特时间轴</button>
+            <button type="button" class="taskflow-tab" data-tf-view="dag">依赖拓扑图</button>
+          </div>
+          <div class="taskflow-segmented" role="group" aria-label="泳道分组">
+            <button type="button" class="taskflow-pill is-active" data-tf-lane="folder">按分组层级</button>
+            <button type="button" class="taskflow-pill" data-tf-lane="device">按电脑</button>
+            <button type="button" class="taskflow-pill" data-tf-lane="chain">按任务链路</button>
+          </div>
+          <div class="taskflow-segmented" role="group" aria-label="时间窗口">
+            <button type="button" class="taskflow-pill" data-tf-win="1h">1小时</button>
+            <button type="button" class="taskflow-pill is-active" data-tf-win="6h">6小时</button>
+            <button type="button" class="taskflow-pill" data-tf-win="24h">24小时</button>
+            <button type="button" class="taskflow-pill" data-tf-win="all">全部</button>
+          </div>
+          <button type="button" class="taskflow-toggle is-active" id="taskflow-toggle-steps" aria-pressed="true">展开内部步骤</button>
+          <button type="button" class="taskflow-toggle" id="taskflow-toggle-linked" aria-pressed="false">仅看有依赖链路</button>
+        </div>
+      </div>
+      <div id="taskflow-canvas" class="taskflow-canvas" aria-live="polite"><p class="empty">正在汇总任务依赖与时间推进数据…</p></div>
+    </section>
     <section class="verification-section" aria-labelledby="verification-title">
       <div class="section-heading"><h2 id="verification-title">逐岗运行验证</h2><button id="verify" class="button" type="button" disabled>接续逐岗验证</button></div>
       <p id="verification-time" class="secondary"></p>

@@ -10307,7 +10307,14 @@
       "back": "归",
       "progressSummary": "{{done}}/{{total}} Agent",
       "tokens": "{{value}} tokens",
-      "noProgress": "尚无进度详情"
+      "noProgress": "尚无进度详情",
+      "viewSwitcher": "秘役观法切换",
+      "viewList": "目録",
+      "viewTimeline": "时序相系",
+      "timelineWindow": "历时",
+      "planStepsSection": "今方略相系诸步",
+      "executionTimeline": "秘役行役时序",
+      "untitledTask": "秘役"
     },
     "resourceUsage": {
       "sections": {
@@ -10521,7 +10528,8 @@
         "automations": "自运",
         "plugins": "法器",
         "bots": "同伴",
-        "search": "寻"
+        "search": "寻",
+        "taskFlow": "役脉"
       }
     },
     "user": {
@@ -13540,7 +13548,16 @@
     },
     "planPill": {
       "step": "第 {{current}} / {{total}} 步",
-      "dismiss": "阖方略"
+      "dismiss": "阖方略",
+      "viewTabs": "方略观法切换",
+      "modeList": "目録",
+      "modeGantt": "时轴",
+      "modeDag": "相系图",
+      "ganttTimeAxis": "依时推移之序",
+      "ganttStageAxis": "依相系次第而行",
+      "dagNoExplicitEdges": "未立前置之限，以下诸步并进",
+      "dagStage": "第 {{index}} 阶",
+      "blockedByPrefix": "先决"
     },
     "forkOrigin": {
       "label": "自原差事分立"
@@ -14815,7 +14832,8 @@
       "backToAutomations": "归 Automations",
       "backToReviewSource": "归来源差事",
       "waitForReply": "候君于文档区回复…",
-      "modelSwitchedFastModeOff": "已易模型，Fast Mode 已阖"
+      "modelSwitchedFastModeOff": "已易模型，Fast Mode 已阖",
+      "taskFlow": "役脉"
     },
     "remoteDesktopConfirmation": {
       "title": "须于远方之机上确认",
@@ -20410,6 +20428,94 @@
     },
     "switchOffer": {
       "action": "易用 {{model}} 续之"
+    }
+  },
+  "taskFlow": {
+    "title": "役脉",
+    "subtitle": "总览同伴、诸机会话与方略诸步之相系流向及实时进境",
+    "viewSwitcher": "役脉观法切换",
+    "refresh": "重览",
+    "searchPlaceholder": "寻役、同伴、电脑或部属…",
+    "filterStatusLabel": "按状择之",
+    "localDevice": "本机",
+    "empty": "今择之下，尚无役迹。",
+    "views": {
+      "gantt": "时序甘特",
+      "dag": "相系拓扑"
+    },
+    "kpi": {
+      "totalNodes": "总役目",
+      "runningNodes": "方兴",
+      "totalEdges": "相系授受之脉",
+      "crossDeviceEdges": "异机协理"
+    },
+    "statusFilter": {
+      "all": "诸状并观"
+    },
+    "toggles": {
+      "expandSteps": "展内详之步",
+      "onlyDependencies": "唯观相系之脉",
+      "includeScheduled": "含定时巡检 ({{count}})"
+    },
+    "groupBy": {
+      "label": "分道",
+      "hierarchy": "依部属",
+      "computer": "依机器",
+      "chain": "依脉络"
+    },
+    "window": {
+      "label": "时限",
+      "1h": "一时辰",
+      "6h": "半昼",
+      "24h": "一日",
+      "7d": "七日",
+      "all": "悉数"
+    },
+    "columns": {
+      "taskItem": "役目 / 同伴",
+      "count": "{{count}} 项"
+    },
+    "status": {
+      "running": "方兴",
+      "waiting": "候命",
+      "completed": "已竟",
+      "failed": "蹉跎",
+      "paused": "暂歇",
+      "idle": "闲居"
+    },
+    "nodeKind": {
+      "companion": "同伴",
+      "session": "会话",
+      "subagent": "属吏",
+      "orca_worker": "协理使",
+      "group_step": "群议之步",
+      "plan_step": "方略之步"
+    },
+    "edgeKind": {
+      "created_task": "起役",
+      "delegated": "委任",
+      "forked": "分枝",
+      "handoff": "授受",
+      "reported": "复命",
+      "orca_dispatch": "调遣",
+      "subagent_spawn": "遣属吏",
+      "blocked_by": "先决所系"
+    },
+    "inspector": {
+      "title": "役目详考",
+      "close": "阖",
+      "openSession": "于 Cindy 中启之",
+      "computer": "所属机器",
+      "folder": "所隶部属",
+      "createdAt": "始立之时",
+      "startedAt": "起行之时",
+      "completedAt": "告竣之时",
+      "elapsed": "历时",
+      "upstream": "前源所系 ({{count}})",
+      "noUpstream": "无前源所系",
+      "downstream": "后继所生 ({{count}})",
+      "noDownstream": "无后继之役",
+      "internalSteps": "内藏方略诸步 ({{count}})"
     }
   }
 }

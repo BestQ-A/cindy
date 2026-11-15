@@ -90,6 +90,7 @@ describe('resolveAgentIslandVisibleSessionIdFromPath', () => {
     expect(resolveAgentIslandVisibleSessionIdFromPath('/cc-agent/new')).toBeNull();
     expect(resolveAgentIslandVisibleSessionIdFromPath('/cc-agent/new-dialogue')).toBeNull();
     expect(resolveAgentIslandVisibleSessionIdFromPath('/cc-agent/scheduled')).toBeNull();
+    expect(resolveAgentIslandVisibleSessionIdFromPath('/cc-agent/task-flow')).toBeNull();
     expect(resolveAgentIslandVisibleSessionIdFromPath('/cc-agent/files/session-a')).toBeNull();
     expect(resolveAgentIslandVisibleSessionIdFromPath('/cc-agent/orca/new')).toBeNull();
   });

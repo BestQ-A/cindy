@@ -80,8 +80,8 @@ beforeEach(() => {
   localStorage.removeItem('sidebar-navigation:apps:v1');
   navigationTesting.resetArrivals();
   setSidebarNavigationPrefs(OWNER, {
-    order: ['automations', 'plugins', 'search'],
-    visible: ['automations', 'plugins', 'search'],
+    order: ['automations', 'taskFlow', 'plugins', 'search'],
+    visible: ['automations', 'taskFlow', 'plugins', 'search'],
   });
 });
 
@@ -419,9 +419,12 @@ describe('Sidebar navigation rows and More', () => {
     expect(view.container.childElementCount).toBe(0);
   });
 
-  it('keeps the previous task when visiting automations before plugins', () => {
+  it('keeps the previous task when visiting automations or task flow before plugins', () => {
     const sessionPath = '/cc-agent/session-1?remoteHostId=host-1#message-2';
     render(<Harness initialPath={sessionPath} />);
+    fireEvent.click(screen.getByRole('button', { name: 'ccAgent.layout.taskFlow' }));
+    expect(screen.getByTestId('location').textContent).toBe('/cc-agent/task-flow');
+    expect(screen.getByRole('button', { name: 'ccAgent.layout.taskFlow' }).getAttribute('aria-current')).toBe('page');
     fireEvent.click(screen.getByRole('button', { name: 'ccAgent.layout.automations' }));
     expect(screen.getByRole('button', { name: 'ccAgent.layout.automations' }).getAttribute('aria-current')).toBe('page');
     fireEvent.click(screen.getByRole('button', { name: 'sidebar.tabs.plugins' }));
@@ -430,6 +433,7 @@ describe('Sidebar navigation rows and More', () => {
     activateSearch();
     expect(screen.getByTestId('location').textContent).toBe(sessionPath);
     expect(screen.getByRole('button', { name: 'ccAgent.layout.automations' }).hasAttribute('aria-current')).toBe(false);
+    expect(screen.getByRole('button', { name: 'ccAgent.layout.taskFlow' }).hasAttribute('aria-current')).toBe(false);
   });
 
   it.each(['/cc-agent/scheduled', '/cc-agent/scheduled/?filter=enabled#schedule-1'])(
@@ -751,7 +755,7 @@ describe('Plugins joining the sidebar', () => {
       .toBe('false');
     fireEvent.click(screen.getByRole('button', { name: 'sidebar.navigation.customize.done' }));
     expect(getSidebarNavigationPrefs('owner-2').visible).toEqual(['automations']);
-    expect(getSidebarNavigationPrefs(OWNER).visible).toEqual(['automations', 'plugins', 'search']);
+    expect(getSidebarNavigationPrefs(OWNER).visible).toEqual(['automations', 'taskFlow', 'plugins', 'search']);
   });
 });
 
