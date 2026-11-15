@@ -71,6 +71,16 @@ describe('botHierarchy core data model & invariants', () => {
     expect(resolveBotFolderId(cfg, 'b1', 'devB')).toBeNull();
     expect(resolveBotFolderId(cfg, 'b2', 'devA')).toBe('f1');
     expect(resolveBotFolderId(cfg, 'b2')).toBeNull();
+
+    // Canonical `bot:b1` with a strictly newer timestamp wins over an older `remote-bot:` entry (including a null tombstone).
+    const f2 = createBotFolder(cfg, { id: 'f2', name: 'Newer Canonical', now: 50 }).config;
+    const canonicalNewer = assignItemsToFolder(f2, [botHierarchyItemKey('b1')], 'f2', { now: 60 });
+    expect(resolveBotFolderId(canonicalNewer, 'b1', 'devB')).toBe('f2');
+    // Older/equal remote override still wins over an older canonical assignment.
+    const equalRemote = assignItemsToFolder(canonicalNewer, [botHierarchyItemKey('b1', 'devC')], 'f1', {
+      now: 60,
+    });
+    expect(resolveBotFolderId(equalRemote, 'b1', 'devC')).toBe('f1');
   });
 
   it('prevents cycles and enforces depth <= 6 across createBotFolder and moveBotFolder', () => {
@@ -445,6 +455,35 @@ describe('applyBotBatchOrganize & buildSmartBotHierarchy', () => {
     expect(hugeResult.summary.skippedForLimits).toBeGreaterThan(0);
     for (const opt of flattenFolderOptions(hugeResult.config)) {
       expect(opt.depth).toBeLessThanOrEqual(BOT_HIERARCHY_MAX_DEPTH);
+    }
+  });
+
+  it('groups space-prefixed teams, device watchdogs, and resource dispatch companions cleanly', () => {
+    const opsRoster: BotRosterOrganizeEntry[] = [
+      { botId: 'o1', name: 'OPTIX 公司事务', description: '整理公司材料与办公产物' },
+      { botId: 'o2', name: 'OPTIX 复核', description: '独立检查交付与来源' },
+      { botId: 'o3', name: 'OPTIX 总协调', description: '接收目标、组织分工' },
+      { botId: 'o4', name: 'OPTIX 资源管家', description: '维护电脑与 AI 资源台账' },
+      { botId: 'm1', name: '4090机', description: '值守 PC4090：GPU 机' },
+      { botId: 'm2', name: '公司机', description: '值守 OPTIX-DISPLAY：只报本机' },
+      { botId: 'r1', name: '资源总管', description: '汇总采集线，管刷新门槛' },
+      { botId: 'r2', name: '调度员', description: '读台账把任务配到具体电脑' },
+      { botId: 'r3', name: '接单员', description: '把需求变成可派的任务单与验收要求' },
+      { botId: 'r4', name: '算力账房', description: '统计 AI 账号与额度余额' },
+      { botId: 'r5', name: '电脑管家', description: '维护电脑、执行器与 Tailscale 台账' },
+    ];
+
+    const res = buildSmartBotHierarchy(createEmptyBotHierarchyConfig(), opsRoster, { now: 2000 });
+    const pathOf = (botId: string) =>
+      getItemFolderBreadcrumb(res.config, botHierarchyItemKey(botId)).map((f) => f.name);
+
+    for (const id of ['o1', 'o2', 'o3', 'o4']) {
+      expect(pathOf(id)).toEqual(['OPTIX']);
+    }
+    expect(pathOf('m1')).toEqual(['资源与设备', '设备值守']);
+    expect(pathOf('m2')).toEqual(['资源与设备', '设备值守']);
+    for (const id of ['r1', 'r2', 'r3', 'r4', 'r5']) {
+      expect(pathOf(id)).toEqual(['资源与设备', '调度与台账']);
     }
   });
 });

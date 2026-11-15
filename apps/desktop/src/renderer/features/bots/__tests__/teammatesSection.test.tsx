@@ -97,6 +97,7 @@ vi.mock('../BotDeleteDialog', () => ({
 }));
 
 import { TeammatesSection } from '../TeammatesSection';
+import { executeSmartOrganize } from '../TeammatesDisplayMenu';
 import { BotConnectionStatus } from '../BotConnectionStatus';
 import {
   getBotHierarchySnapshot,
@@ -112,6 +113,7 @@ import { setDataOwnerGeneration } from '@/contexts/dataOwnerGeneration';
 import { toast } from '@/lib/toast';
 import {
   assignItemsToFolder,
+  botHierarchyItemKey,
   createBotFolder,
   createEmptyBotHierarchyConfig,
   resolveItemFolderId,
@@ -1623,5 +1625,81 @@ describe('TeammatesSection hierarchy, display menu, and tree interactions', () =
       expect(view.container.querySelector('[data-computer-section="device:peer-2"]')).not.toBeNull();
       expect(screen.getByText('optix-display')).toBeTruthy();
     });
+  });
+
+  it('uses canonical keys for cloud remote companions, falls back for local self-remote keys, and prunes obsolete folders', async () => {
+    mocks.devices = [
+      { deviceId: 'dev-self', name: 'Workstation', isSelf: true },
+      { deviceId: 'dev-home', name: 'HomePC', isSelf: false },
+    ];
+    mocks.cloud = {
+      enabled: true,
+      selfDeviceId: 'dev-self',
+      humanActorId: 'human-1',
+      actors: [
+        { id: 'actor-cloud-dev', externalId: 'cloud-dev', name: '万界｜主程（P01）', avatar: null, homeDeviceId: 'dev-home' },
+      ],
+      demotedBotIds: [],
+    };
+    mocks.remoteBots = [
+      {
+        id: 'cloud-dev',
+        deviceId: 'dev-home',
+        deviceName: 'HomePC',
+        name: '万界｜主程（P01）',
+        avatar: '🤖',
+        avatarColor: 'violet',
+        description: '',
+        preview: 'Remote cloud chat',
+        activityAt: 100,
+        sessionId: 'cloud-dev-chat',
+        online: true,
+      },
+    ];
+    mocks.profiles = [
+      bot({ id: 'local-peer-grouped', name: '本地研发', lastMessagePreview: 'Local preview' }),
+    ];
+
+    await mutateBotHierarchy((curr) => {
+      let next = createBotFolder(curr, { id: 'f-legacy', name: '旧分组', now: 10 }).config;
+      next = createBotFolder(next, { id: 'f-manual-empty', name: '手动空文件夹', now: 11 }).config;
+      // Legacy peer-created remote-bot key targeting our local companion should resolve for local display.
+      next = assignItemsToFolder(next, [botHierarchyItemKey('local-peer-grouped', 'dev-self')], 'f-legacy', {
+        now: 12,
+      });
+      // Legacy peer-created remote-bot key for cloud companion before canonical key exists.
+      next = assignItemsToFolder(next, [botHierarchyItemKey('cloud-dev', 'dev-home')], 'f-legacy', {
+        now: 12,
+      });
+      return next;
+    });
+
+    const view = await renderSidebar();
+
+    // Both local fallback (`remote-bot:dev-self:...`) and cloud remote (`remote-bot:dev-home:...`) render inside `f-legacy`
+    // while using canonical `bot:cloud-dev` as the tree entry key for cloud remote companions.
+    expect(view.container.querySelector('[data-hierarchy-folder-id="f-legacy"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-hierarchy-item-key="bot:cloud-dev"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-hierarchy-item-key="bot:local-peer-grouped"]')).not.toBeNull();
+
+    // Triggering smart organize from quick grouping bar writes canonical keys, deletes stale `remote-bot:` entries,
+    // tombstones emptied legacy folders (`f-legacy`), and preserves manually created empty folders (`f-manual-empty`).
+    fireEvent.click(screen.getByRole('button', { name: 'bots.hierarchy.quickSmartOrganize' }));
+
+    await waitFor(() => {
+      const snap = getBotHierarchySnapshot().config;
+      expect(snap.assignments['bot:cloud-dev']?.folderId).toBeTruthy();
+      expect(snap.assignments['remote-bot:dev-home:cloud-dev']).toBeUndefined();
+      expect(snap.folders['f-legacy']).toBeUndefined();
+      expect(snap.deletedFolderIds['f-legacy']).toBeGreaterThan(0);
+      expect(snap.folders['f-manual-empty']).toBeTruthy();
+    });
+
+    // Direct executeSmartOrganize call cleanly reports organized entries when re-organizing.
+    const repeat = await executeSmartOrganize(
+      [{ kind: 'bot', itemKey: 'bot:cloud-dev', botId: 'cloud-dev', deviceId: 'dev-home', name: '万界｜主程（P01）', isRemote: true }],
+      'dev-self',
+    );
+    expect(repeat.config.folders['f-manual-empty']).toBeTruthy();
   });
 });

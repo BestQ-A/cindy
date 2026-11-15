@@ -496,3 +496,34 @@ it('attaches multi-level folder groupId/groupPath/groupOrder to local and remote
   const denied = () => { throw Object.assign(new Error('x'), { code: 'PERMISSION_DENIED' }); };
   await expect(host.hierarchy!(denied)).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
 });
+
+it('falls back to self-device remote keys for local companions and prefers newer canonical keys for remote cloud companions', async () => {
+  let config = createEmptyBotHierarchyConfig(100);
+  config = createBotFolder(config, { id: 'f-legacy', name: '旧目录', now: 101 }).config;
+  config = createBotFolder(config, { id: 'f-canon', name: '新目录', now: 102 }).config;
+  // Peer computer saved local companion `ada` under `remote-bot:here:ada` instead of canonical `bot:ada`.
+  config = assignItemsToFolder(config, [botHierarchyItemKey('ada', 'here')], 'f-legacy', { now: 105 });
+  // Remote cloud companion `far` has an older tombstoned/null remote entry and a newer canonical `bot:far` entry.
+  config = assignItemsToFolder(config, [botHierarchyItemKey('far', 'laptop')], null, { now: 105 });
+  config = assignItemsToFolder(config, [botHierarchyItemKey('far')], 'f-canon', { now: 200 });
+
+  const remote = laptop(() => ({
+    version: 1,
+    companions: [farOnLaptop],
+    sessions: {},
+    conversations: { far: 'far-main' },
+  }));
+  const host = createPluginCompanionHost({ ...deps(remote), readHierarchy: () => config });
+  const companions = await host.list(() => {});
+
+  expect(companions.find(c => c.id === 'ada')).toMatchObject({
+    groupId: 'f-legacy',
+    groupPath: ['旧目录'],
+    groupOrder: 0,
+  });
+  expect(companions.find(c => c.id === 'far')).toMatchObject({
+    groupId: 'f-canon',
+    groupPath: ['新目录'],
+    groupOrder: 0,
+  });
+});

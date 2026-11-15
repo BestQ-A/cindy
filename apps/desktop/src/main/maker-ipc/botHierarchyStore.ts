@@ -279,7 +279,7 @@ function commitLocalAtomic(
   });
 }
 
-async function pullCloudPreferenceIntoLocal(pushLocalIfRemoteMissing = false): Promise<BotHierarchySnapshot> {
+async function pullCloudPreferenceIntoLocal(pushLocalIfAhead = false): Promise<BotHierarchySnapshot> {
   return withCloudSyncLock(async () => {
     if (!isCloudSyncSessionActive()) {
       return readBotHierarchySnapshot();
@@ -292,7 +292,7 @@ async function pullCloudPreferenceIntoLocal(pushLocalIfRemoteMissing = false): P
         return readBotHierarchySnapshot();
       }
       if (value === null || value === undefined) {
-        if (pushLocalIfRemoteMissing) {
+        if (pushLocalIfAhead) {
           const currentLocal = readBotHierarchyConfig();
           if (hasAnyHierarchyContent(currentLocal)) {
             await pushLocalConfigToCloud(currentLocal, scope);
@@ -307,14 +307,19 @@ async function pullCloudPreferenceIntoLocal(pushLocalIfRemoteMissing = false): P
       if (!isDataOwnerBroadcastScopeCurrent(scope)) {
         return readBotHierarchySnapshot();
       }
-      const snapshot: BotHierarchySnapshot = {
-        ownerId: getSafeOwnerId(),
-        config: next,
-      };
       if (changed) {
-        emitHierarchyChanged(snapshot, scope.ownerStamp);
+        emitHierarchyChanged(
+          { ownerId: getSafeOwnerId(), config: next },
+          scope.ownerStamp,
+        );
       }
-      return snapshot;
+      if (pushLocalIfAhead && !configsEqual(next, remote)) {
+        await pushLocalConfigToCloud(next, scope);
+        if (!isDataOwnerBroadcastScopeCurrent(scope)) {
+          return readBotHierarchySnapshot();
+        }
+      }
+      return readBotHierarchySnapshot();
     } catch (error) {
       log.warn('bot hierarchy cloud preference pull failed', {
         error: error instanceof Error ? error.message : String(error),
@@ -386,7 +391,7 @@ function maybeTriggerInitialCloudPull(): void {
   const scopeKey = getSafeScopeKey();
   if (syncedScopeKey === scopeKey) return;
   syncedScopeKey = scopeKey;
-  void pullCloudPreferenceIntoLocal(false);
+  void pullCloudPreferenceIntoLocal(true);
 }
 
 /**

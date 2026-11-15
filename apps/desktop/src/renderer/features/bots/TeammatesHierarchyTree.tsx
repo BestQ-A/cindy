@@ -172,11 +172,36 @@ interface SubtreeSummary {
   dotTone: DotTone | null;
 }
 
-function entryFolderId(config: BotHierarchyConfigV1, entry: TeammateTreeEntry): string | null {
+function entryFolderId(
+  config: BotHierarchyConfigV1,
+  entry: TeammateTreeEntry,
+  localDeviceId?: string | null,
+): string | null {
   if (entry.kind === 'group') {
     return resolveItemFolderId(config, entry.itemKey);
   }
-  return resolveBotFolderId(config, entry.bot.id, entry.deviceId);
+  if (entry.deviceId) {
+    return resolveBotFolderId(config, entry.bot.id, entry.deviceId);
+  }
+  const canonicalKey = botHierarchyItemKey(entry.bot.id);
+  const selfDid = typeof localDeviceId === 'string' ? localDeviceId.trim() : '';
+  if (selfDid) {
+    const selfRemoteKey = botHierarchyItemKey(entry.bot.id, selfDid);
+    if (selfRemoteKey && Object.prototype.hasOwnProperty.call(config.assignments ?? {}, selfRemoteKey)) {
+      const hasCanonical = Boolean(
+        canonicalKey && Object.prototype.hasOwnProperty.call(config.assignments ?? {}, canonicalKey),
+      );
+      if (
+        hasCanonical &&
+        (config.assignments[canonicalKey]?.updatedAt ?? 0) >=
+          (config.assignments[selfRemoteKey]?.updatedAt ?? 0)
+      ) {
+        return resolveItemFolderId(config, canonicalKey);
+      }
+      return resolveItemFolderId(config, selfRemoteKey);
+    }
+  }
+  return canonicalKey ? resolveItemFolderId(config, canonicalKey) : null;
 }
 
 function entryOrderScore(
@@ -184,24 +209,43 @@ function entryOrderScore(
   entry: TeammateTreeEntry,
   folderId: string | null,
   rootOrderIndex: Map<string, number>,
+  localDeviceId?: string | null,
 ): number | null {
+  const botId = entry.kind !== 'group' ? entry.bot.id : '';
+  const canonicalKey = botId ? botHierarchyItemKey(botId) : '';
+  const selfDid =
+    botId && !entry.deviceId && typeof localDeviceId === 'string'
+      ? localDeviceId.trim()
+      : '';
+  const selfRemoteKey = botId && selfDid ? botHierarchyItemKey(botId, selfDid) : '';
+
   if (folderId === null) {
     const idx = rootOrderIndex.get(entry.itemKey);
     if (idx !== undefined) return idx;
-    if (entry.kind !== 'group' && entry.deviceId) {
-      const canonicalIdx = rootOrderIndex.get(botHierarchyItemKey(entry.bot.id));
+    if (entry.kind !== 'group' && entry.deviceId && canonicalKey) {
+      const canonicalIdx = rootOrderIndex.get(canonicalKey);
       if (canonicalIdx !== undefined) return canonicalIdx;
     }
-    const rootAssignment = config.assignments[entry.itemKey];
+    if (selfRemoteKey) {
+      const selfIdx = rootOrderIndex.get(selfRemoteKey);
+      if (selfIdx !== undefined) return selfIdx;
+    }
+    const rootAssignment =
+      config.assignments[entry.itemKey] ??
+      (selfRemoteKey ? config.assignments[selfRemoteKey] : undefined);
     if (rootAssignment && rootAssignment.folderId === null) return rootAssignment.order;
     return null;
   }
 
   const direct = config.assignments[entry.itemKey];
   if (direct && direct.folderId === folderId) return direct.order;
-  if (entry.kind !== 'group' && entry.deviceId) {
-    const canonical = config.assignments[botHierarchyItemKey(entry.bot.id)];
+  if (entry.kind !== 'group' && entry.deviceId && canonicalKey) {
+    const canonical = config.assignments[canonicalKey];
     if (canonical && canonical.folderId === folderId) return canonical.order;
+  }
+  if (selfRemoteKey) {
+    const selfRemote = config.assignments[selfRemoteKey];
+    if (selfRemote && selfRemote.folderId === folderId) return selfRemote.order;
   }
   return null;
 }
@@ -212,10 +256,11 @@ function sortEntriesForContainer(
   folderId: string | null,
   originalIndex: Map<string, number>,
   rootOrderIndex: Map<string, number>,
+  localDeviceId?: string | null,
 ): TeammateTreeEntry[] {
   return [...items].sort((a, b) => {
-    const scoreA = entryOrderScore(config, a, folderId, rootOrderIndex);
-    const scoreB = entryOrderScore(config, b, folderId, rootOrderIndex);
+    const scoreA = entryOrderScore(config, a, folderId, rootOrderIndex, localDeviceId);
+    const scoreB = entryOrderScore(config, b, folderId, rootOrderIndex, localDeviceId);
     if (scoreA !== null && scoreB !== null && scoreA !== scoreB) return scoreA - scoreB;
     if (scoreA !== null && scoreB === null) return -1;
     if (scoreA === null && scoreB !== null) return 1;
@@ -663,7 +708,7 @@ export function TeammatesHierarchyTree({
     const membersByFolder = new Map<string | null, TeammateTreeEntry[]>();
     const activeFolderIds = new Set<string>();
     for (const entry of sectionEntries) {
-      const folderId = entryFolderId(config, entry);
+      const folderId = entryFolderId(config, entry, localDeviceId);
       if (folderId) activeFolderIds.add(folderId);
       const bucket = membersByFolder.get(folderId);
       if (bucket) bucket.push(entry);
@@ -673,7 +718,7 @@ export function TeammatesHierarchyTree({
     for (const [folderId, bucket] of membersByFolder.entries()) {
       membersByFolder.set(
         folderId,
-        sortEntriesForContainer(config, bucket, folderId, originalIndex, rootOrderIndex),
+        sortEntriesForContainer(config, bucket, folderId, originalIndex, rootOrderIndex, localDeviceId),
       );
     }
 

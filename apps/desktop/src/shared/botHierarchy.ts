@@ -651,14 +651,23 @@ export function resolveBotFolderId(
   botId: string,
   deviceId?: string | null,
 ): string | null {
+  const canonicalKey = botHierarchyItemKey(botId);
+  const canonicalAssignment = canonicalKey ? config.assignments?.[canonicalKey] : undefined;
   const did = typeof deviceId === 'string' ? deviceId.trim() : '';
   if (did) {
     const remoteKey = botHierarchyItemKey(botId, did);
     if (remoteKey && Object.prototype.hasOwnProperty.call(config.assignments ?? {}, remoteKey)) {
+      const remoteAssignment = config.assignments?.[remoteKey];
+      if (
+        canonicalAssignment &&
+        remoteAssignment &&
+        canonicalAssignment.updatedAt > remoteAssignment.updatedAt
+      ) {
+        return resolveItemFolderId(config, canonicalKey);
+      }
       return resolveItemFolderId(config, remoteKey);
     }
   }
-  const canonicalKey = botHierarchyItemKey(botId);
   return canonicalKey ? resolveItemFolderId(config, canonicalKey) : null;
 }
 
@@ -1624,9 +1633,16 @@ function extractNamespacePrefix(name: string): string | null {
   if (!trimmed) return null;
   // Support `万界｜...`, `万界 | ...`, `团队 / ...`, `Proj: ...`, `Team - Member`.
   const match = trimmed.match(/^([^\s｜|/:\\-][^｜|/:\\]{0,31}?)\s*(?:[｜|/：:]|\s+-\s+)\s*\S/);
-  if (!match) return null;
-  const prefix = sanitizeFolderName(match[1]);
-  return prefix.length >= 1 ? prefix : null;
+  if (match) {
+    const prefix = sanitizeFolderName(match[1]);
+    return prefix.length >= 1 ? prefix : null;
+  }
+  const spacePrefix = trimmed.match(/^([A-Z][A-Z0-9_-]{1,15})\s+(?=[\u4e00-\u9fff])/);
+  if (spacePrefix) {
+    const prefix = sanitizeFolderName(spacePrefix[1]);
+    return prefix.length >= 1 ? prefix : null;
+  }
+  return null;
 }
 
 const KEYWORD_CATEGORY_RULES: Array<{ keywords: string[]; path: string[] }> = [
@@ -1710,12 +1726,37 @@ const KEYWORD_CATEGORY_RULES: Array<{ keywords: string[]; path: string[] }> = [
   },
 ];
 
+const DEVICE_WATCHDOG_KEYWORDS = ['值守', '项目机', 'gpu 机', '只报本机'];
+const RESOURCE_DISPATCH_KEYWORDS = [
+  '资源总管',
+  '资源管家',
+  '电脑管家',
+  '网络管家',
+  '工具巡检',
+  '算力',
+  '账房',
+  '调度员',
+  '接单员',
+  '任务单',
+  '派工',
+  '台账',
+  'tailscale',
+  '执行器',
+];
+
 function classifyByKeywords(entry: BotRosterOrganizeEntry): string[] | null {
   const combined = [entry.name, entry.title, entry.role, entry.description]
     .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
     .join(' ')
     .toLowerCase();
   if (!combined) return null;
+
+  if (/\S机$/.test(entry.name.trim()) || DEVICE_WATCHDOG_KEYWORDS.some((kw) => combined.includes(kw))) {
+    return ['资源与设备', '设备值守'];
+  }
+  if (RESOURCE_DISPATCH_KEYWORDS.some((kw) => combined.includes(kw))) {
+    return ['资源与设备', '调度与台账'];
+  }
 
   for (const rule of KEYWORD_CATEGORY_RULES) {
     if (rule.keywords.some((kw) => combined.includes(kw))) {
@@ -1809,6 +1850,7 @@ export function buildSmartBotHierarchy(
     const keywordPath = roleCategoryPath ? null : classifyByKeywords(entry);
 
     let targetPath: string[] | null = null;
+    const hasExplicitDelimiter = /(?:[｜|/：:]|\s+-\s+)/.test(entry.name);
     const hasExplicitNsSeparator = /[｜|]/.test(entry.name);
     const useNamespace =
       prefix !== null &&
@@ -1817,6 +1859,8 @@ export function buildSmartBotHierarchy(
     if (useNamespace && prefix) {
       if (roleCategoryPath) {
         targetPath = [prefix, ...roleCategoryPath];
+      } else if (!hasExplicitDelimiter && (prefixCounts.get(prefix) ?? 0) < 6) {
+        targetPath = [prefix];
       } else if (keywordPath) {
         targetPath = [prefix, ...keywordPath];
       } else {

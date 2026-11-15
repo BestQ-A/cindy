@@ -675,7 +675,7 @@ export function TeammatesSection() {
       'remote-bot',
       remoteBotKey(bot),
       <BotMoveToFolderSubmenu
-        itemKey={botHierarchyItemKey(bot.id, bot.deviceId)}
+        itemKey={isCloudCompanionRemote(cloud, bot) ? botHierarchyItemKey(bot.id) : botHierarchyItemKey(bot.id, bot.deviceId)}
         onCreatedAndMoved={onMovedIntoNewFolder}
       />,
     );
@@ -966,7 +966,12 @@ export function TeammatesSection() {
       if (!currentCindy) continue;
       const bot = currentCindy.bot;
       const local = 'deviceId' in bot ? null : bot;
-      const itemKey = botHierarchyItemKey(bot.id, 'deviceId' in bot ? bot.deviceId : undefined);
+      const isCloudRemoteCindy = 'deviceId' in bot && isCloudCompanionRemote(cloud, bot);
+      const canonicalCindyKey = botHierarchyItemKey(bot.id);
+      const itemKey =
+        'deviceId' in bot && (!isCloudRemoteCindy || treeEntrySourceByKey.has(canonicalCindyKey))
+          ? botHierarchyItemKey(bot.id, bot.deviceId)
+          : canonicalCindyKey;
       const activity = local ? botRunningActivity(local) : undefined;
       const remoteRunning = 'deviceId' in bot && bot.online
         && (bot.generation || bot.teammateActivity?.phase === 'running');
@@ -1012,7 +1017,12 @@ export function TeammatesSection() {
 
     const bot = entry.bot;
     if ('deviceId' in bot) {
-      const itemKey = botHierarchyItemKey(bot.id, bot.deviceId);
+      const isCloudRemote = isCloudCompanionRemote(cloud, bot);
+      const canonicalKey = botHierarchyItemKey(bot.id);
+      const itemKey =
+        isCloudRemote && canonicalKey && !treeEntrySourceByKey.has(canonicalKey)
+          ? canonicalKey
+          : botHierarchyItemKey(bot.id, bot.deviceId);
       const status = statusForBot(bot);
       const deviceName = botDeviceLabel({ deviceId: bot.deviceId, name: bot.deviceName }, rosterDevices);
       const showRunning = status !== 'awaiting' && bot.online
@@ -1287,6 +1297,7 @@ export function TeammatesSection() {
           ) : null}
           <TeammatesDisplayMenu
             organizeEntries={organizeEntries}
+            deviceId={self?.deviceId ?? undefined}
             groupByComputer={groupByComputer}
             compactDensity={compactDensity}
             onGroupByComputerChange={handleGroupByComputerChange}

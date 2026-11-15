@@ -22,8 +22,11 @@ import { toast } from '@/lib/toast';
 import {
   type BotHierarchyConfigV1,
   type BotRosterOrganizeEntry,
+  botHierarchyItemKey,
   buildSmartBotHierarchy,
   createBotFolder,
+  deleteBotFolder,
+  normalizeBotHierarchyConfig,
 } from '../../../shared/botHierarchy';
 import {
   mutateBotHierarchy,
@@ -40,6 +43,13 @@ export interface SmartOrganizeOutcome {
   config: BotHierarchyConfigV1;
 }
 
+function extractRemoteBotIdFromKey(key: string): string | null {
+  if (!key.startsWith('remote-bot:')) return null;
+  const rest = key.slice('remote-bot:'.length);
+  const sep = rest.indexOf(':');
+  return sep >= 0 ? rest.slice(sep + 1) || null : null;
+}
+
 /**
  * Runs role/prefix/keyword smart organization over the given roster entries.
  * If all eligible entries are already grouped, retries with overwrite so re-running
@@ -52,6 +62,17 @@ export async function executeSmartOrganize(
   let organizedCount = 0;
   let folderIds: string[] = [];
   const nextConfig = await mutateBotHierarchy((curr) => {
+    const foldersWithMembersBefore = new Set<string>();
+    for (const assignment of Object.values(curr.assignments)) {
+      let folderId = assignment.folderId;
+      const visited = new Set<string>();
+      while (folderId && curr.folders[folderId] && !visited.has(folderId)) {
+        visited.add(folderId);
+        foldersWithMembersBefore.add(folderId);
+        folderId = curr.folders[folderId]?.parentId ?? null;
+      }
+    }
+
     const initial = buildSmartBotHierarchy(curr, organizeEntries, { deviceId });
     let resolved = initial;
     if (
@@ -72,11 +93,58 @@ export async function executeSmartOrganize(
         resolved = refreshed;
       }
     }
-    organizedCount = resolved.summary.assignedItemCount + resolved.summary.createdFolderIds.length;
+
+    let next: BotHierarchyConfigV1 = {
+      ...resolved.config,
+      folders: { ...resolved.config.folders },
+      assignments: { ...resolved.config.assignments },
+      rootOrder: [...resolved.config.rootOrder],
+      deletedFolderIds: { ...resolved.config.deletedFolderIds },
+    };
+
+    let cleanedStaleCount = 0;
+    for (const key of Object.keys(next.assignments)) {
+      const remoteBotId = extractRemoteBotIdFromKey(key);
+      if (!remoteBotId) continue;
+      const canonicalKey = botHierarchyItemKey(remoteBotId);
+      const canonicalAssignment = canonicalKey ? next.assignments[canonicalKey] : undefined;
+      const remoteAssignment = next.assignments[key];
+      if (
+        canonicalAssignment &&
+        remoteAssignment &&
+        canonicalAssignment.updatedAt > remoteAssignment.updatedAt
+      ) {
+        delete next.assignments[key];
+        cleanedStaleCount += 1;
+      }
+    }
+
+    let prunedCount = 0;
+    let removedInPass = true;
+    while (removedInPass) {
+      removedInPass = false;
+      for (const fid of foldersWithMembersBefore) {
+        if (!next.folders[fid]) continue;
+        const hasChildFolder = Object.values(next.folders).some((f) => f.parentId === fid);
+        if (hasChildFolder) continue;
+        const hasAssignedItem = Object.values(next.assignments).some((a) => a.folderId === fid);
+        if (hasAssignedItem) continue;
+        next = deleteBotFolder(next, fid, { mode: 'cascade', deviceId });
+        prunedCount += 1;
+        removedInPass = true;
+      }
+    }
+
+    next = normalizeBotHierarchyConfig(next);
+    organizedCount =
+      resolved.summary.assignedItemCount +
+      resolved.summary.createdFolderIds.length +
+      cleanedStaleCount +
+      prunedCount;
     folderIds = Array.from(
       new Set([...resolved.summary.createdFolderIds, ...resolved.summary.updatedFolderIds]),
-    );
-    return resolved.config;
+    ).filter((id) => Boolean(next.folders[id]));
+    return next;
   });
 
   return { organizedCount, folderIds, config: nextConfig };
@@ -85,6 +153,7 @@ export async function executeSmartOrganize(
 export interface TeammatesDisplayMenuProps {
   /** Roster entries passed to smart organize when triggered from the menu. */
   organizeEntries: BotRosterOrganizeEntry[];
+  deviceId?: string;
   groupByComputer: boolean;
   compactDensity: boolean;
   onGroupByComputerChange: (enabled: boolean) => void;
@@ -102,6 +171,7 @@ export interface TeammatesDisplayMenuProps {
  */
 export function TeammatesDisplayMenu({
   organizeEntries,
+  deviceId,
   groupByComputer,
   compactDensity,
   onGroupByComputerChange,
@@ -133,7 +203,7 @@ export function TeammatesDisplayMenu({
   };
 
   const handleSmartOrganize = async () => {
-    const { organizedCount, folderIds } = await executeSmartOrganize(organizeEntries);
+    const { organizedCount, folderIds } = await executeSmartOrganize(organizeEntries, deviceId);
 
     if (organizedCount === 0) {
       toast.info(t('bots.hierarchy.smartOrganizeEmpty'));

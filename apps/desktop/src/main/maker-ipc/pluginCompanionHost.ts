@@ -12,7 +12,7 @@ import type {
 } from '../../shared/pluginCompanions.js';
 import {
   botHierarchyItemKey, buildBotFolderTree, flattenFolderOptions, getFolderBreadcrumb, normalizeBotHierarchyConfig,
-  resolveBotFolderId, type BotHierarchyConfigV1, type BotHierarchyFolderTreeNode,
+  resolveBotFolderId, resolveItemFolderId, type BotHierarchyConfigV1, type BotHierarchyFolderTreeNode,
 } from '../../shared/botHierarchy.js';
 import { readBotHierarchyConfig } from './botHierarchyStore.js';
 import { OWNER_ONLY_HOST_CONFIRMATION_TOOL_NAMES } from '../agent-app-update/constants.js';
@@ -229,33 +229,82 @@ function resolveCompanionAssignment(
   config: BotHierarchyConfigV1,
   companionId: string,
   deviceId?: string | null,
+  selfDeviceId?: string | null,
 ): { folderId: string | null; order?: number } {
   const did = typeof deviceId === 'string' ? deviceId.trim() : '';
-  const remoteKey = did ? botHierarchyItemKey(companionId, did) : '';
+  const selfDid = !did && typeof selfDeviceId === 'string' ? selfDeviceId.trim() : '';
   const canonicalKey = botHierarchyItemKey(companionId);
-  const folderId = resolveBotFolderId(config, companionId, did || undefined);
+  const hasCanonical = Boolean(
+    canonicalKey && Object.prototype.hasOwnProperty.call(config.assignments, canonicalKey),
+  );
+  const canonicalAssignment = hasCanonical ? config.assignments[canonicalKey] : undefined;
+
+  if (did) {
+    const remoteKey = botHierarchyItemKey(companionId, did);
+    const folderId = resolveBotFolderId(config, companionId, did);
+
+    if (folderId) {
+      const hasRemote = Boolean(
+        remoteKey && Object.prototype.hasOwnProperty.call(config.assignments, remoteKey),
+      );
+      const remoteAssignment = hasRemote ? config.assignments[remoteKey] : undefined;
+      const matchingRemote = remoteAssignment?.folderId === folderId ? remoteAssignment : undefined;
+      const matchingCanonical =
+        canonicalAssignment?.folderId === folderId ? canonicalAssignment : undefined;
+      const assignment =
+        matchingRemote && matchingCanonical
+          ? matchingCanonical.updatedAt >= matchingRemote.updatedAt
+            ? matchingCanonical
+            : matchingRemote
+          : matchingCanonical ?? matchingRemote;
+      return { folderId, ...(assignment ? { order: assignment.order } : {}) };
+    }
+
+    const rootIdx = config.rootOrder.findIndex(
+      key => (remoteKey && key === remoteKey) || key === canonicalKey,
+    );
+    if (rootIdx >= 0) {
+      return { folderId: null, order: rootIdx };
+    }
+    const explicitNull =
+      (remoteKey && config.assignments[remoteKey]?.folderId === null
+        ? config.assignments[remoteKey]
+        : undefined) ??
+      (canonicalAssignment?.folderId === null ? canonicalAssignment : undefined);
+    if (explicitNull) {
+      return { folderId: null, order: explicitNull.order };
+    }
+    return { folderId: null };
+  }
+
+  // Local companion: resolve canonical `bot:<id>`, falling back to `remote-bot:<selfDeviceId>:<id>`
+  // when canonical is absent or older than a device-scoped record synced from a peer computer.
+  const selfRemoteKey = selfDid ? botHierarchyItemKey(companionId, selfDid) : '';
+  const hasSelfRemote = Boolean(
+    selfRemoteKey && Object.prototype.hasOwnProperty.call(config.assignments, selfRemoteKey),
+  );
+  const selfRemoteAssignment = hasSelfRemote ? config.assignments[selfRemoteKey] : undefined;
+  const useSelfRemote =
+    hasSelfRemote &&
+    (!hasCanonical ||
+      (selfRemoteAssignment?.updatedAt ?? 0) > (canonicalAssignment?.updatedAt ?? 0));
+  const resolvedKey = useSelfRemote ? selfRemoteKey : canonicalKey;
+  const folderId = resolvedKey ? resolveItemFolderId(config, resolvedKey) : null;
 
   if (folderId) {
-    const assignment =
-      (remoteKey && Object.prototype.hasOwnProperty.call(config.assignments, remoteKey)
-        ? config.assignments[remoteKey]
-        : undefined) ?? config.assignments[canonicalKey];
+    const assignment = resolvedKey ? config.assignments[resolvedKey] : undefined;
     return { folderId, ...(assignment ? { order: assignment.order } : {}) };
   }
 
   const rootIdx = config.rootOrder.findIndex(
-    key => (remoteKey && key === remoteKey) || key === canonicalKey,
+    key => key === canonicalKey || (selfRemoteKey && key === selfRemoteKey),
   );
   if (rootIdx >= 0) {
     return { folderId: null, order: rootIdx };
   }
-  const explicitNull =
-    (remoteKey && config.assignments[remoteKey]?.folderId === null
-      ? config.assignments[remoteKey]
-      : undefined) ??
-    (config.assignments[canonicalKey]?.folderId === null
-      ? config.assignments[canonicalKey]
-      : undefined);
+  const explicitNull = useSelfRemote
+    ? (selfRemoteAssignment?.folderId === null ? selfRemoteAssignment : undefined)
+    : (canonicalAssignment?.folderId === null ? canonicalAssignment : undefined);
   if (explicitNull) {
     return { folderId: null, order: explicitNull.order };
   }
@@ -266,9 +315,10 @@ function applyHierarchyToCompanion(
   companion: PluginCompanion,
   config: BotHierarchyConfigV1,
   deviceId?: string | null,
+  selfDeviceId?: string | null,
 ): PluginCompanion {
   if (!hasHierarchyEntries(config)) return companion;
-  const { folderId, order } = resolveCompanionAssignment(config, companion.id, deviceId);
+  const { folderId, order } = resolveCompanionAssignment(config, companion.id, deviceId, selfDeviceId);
   if (folderId) {
     const groupPath = getFolderBreadcrumb(config, folderId).map(folder => folder.name);
     return {
@@ -616,10 +666,11 @@ export function createPluginCompanionHost(deps: PluginCompanionHostDeps) {
   const adapter: PluginCompanionAdapter = {
     async list(guard) {
       const local = await localView(guard);
+      const selfDeviceId = companionHomes.snapshot().selfDeviceId;
       const byHome = remoteActors(new Set(local.companions.map(companion => companion.id)));
       if (byHome.size === 0) {
         const config = readConfig();
-        return local.companions.map(companion => applyHierarchyToCompanion(companion, config));
+        return local.companions.map(companion => applyHierarchyToCompanion(companion, config, null, selfDeviceId));
       }
       const devices = await homeDevices(guard);
       const homes = await Promise.all([...byHome].map(async ([deviceId, actors]) => {
@@ -629,7 +680,7 @@ export function createPluginCompanionHost(deps: PluginCompanionHostDeps) {
       }));
       guard();
       const config = readConfig();
-      const localList = local.companions.map(companion => applyHierarchyToCompanion(companion, config));
+      const localList = local.companions.map(companion => applyHierarchyToCompanion(companion, config, null, selfDeviceId));
       const remote = homes.flatMap(({ deviceId, actors, view, deviceName }) => actors.flatMap((actor): PluginCompanion[] => {
         if (!view.reachable) {
           return [applyHierarchyToCompanion(offlineCompanion(actor.id, actor.name, deviceName), config, deviceId)];
