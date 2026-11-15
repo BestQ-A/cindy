@@ -162,4 +162,35 @@ describe('taskFlowGraph engine', () => {
     expect(swim.lanes).toHaveLength(1);
     expect(swim.lanes[0].nodes).toHaveLength(3);
   });
+
+  it('clusters connected chains above isolated nodes and separates main spine from branches in DAG layout', () => {
+    const nodes = [
+      { id: 'root', kind: 'session' as const, title: '主需求', status: 'running' as const, createdAtMs: 100, updatedAtMs: 500 },
+      { id: 'main-2', kind: 'session' as const, title: '核心开发', status: 'running' as const, createdAtMs: 200, updatedAtMs: 600 },
+      { id: 'main-3', kind: 'session' as const, title: '联调上线', status: 'waiting' as const, createdAtMs: 300, updatedAtMs: 700 },
+      { id: 'side-1', kind: 'subagent' as const, title: '文档补充', status: 'completed' as const, createdAtMs: 250, updatedAtMs: 400 },
+      { id: 'solo', kind: 'session' as const, title: '独立空闲会话', status: 'idle' as const, createdAtMs: 50, updatedAtMs: 100 },
+    ];
+    const edges = [
+      { id: 'e1', from: 'root', to: 'main-2', kind: 'delegated' as const },
+      { id: 'e2', from: 'main-2', to: 'main-3', kind: 'handoff' as const },
+      { id: 'e3', from: 'root', to: 'side-1', kind: 'delegated' as const },
+    ];
+    const layout = layoutTaskFlowDag(nodes, edges);
+    expect(layout.chains).toHaveLength(1);
+    expect(layout.isolatedCount).toBe(1);
+
+    const byId = new Map(layout.nodes.map((n) => [n.node.id, n]));
+    expect(byId.get('root')?.role).toBe('spine');
+    expect(byId.get('main-2')?.role).toBe('spine');
+    expect(byId.get('main-3')?.role).toBe('spine');
+    expect(byId.get('root')?.row).toBe(0);
+    expect(byId.get('main-2')?.row).toBe(0);
+    expect(byId.get('main-3')?.row).toBe(0);
+
+    expect(byId.get('side-1')?.role).toBe('branch');
+    expect(byId.get('side-1')?.row).toBeGreaterThanOrEqual(1);
+    expect(byId.get('solo')?.role).toBe('isolated');
+    expect(byId.get('solo')!.y).toBeGreaterThan(byId.get('side-1')!.y);
+  });
 });

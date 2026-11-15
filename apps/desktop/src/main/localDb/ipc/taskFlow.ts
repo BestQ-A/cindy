@@ -93,10 +93,20 @@ const ACTIVE_TURN_STALE_MS = 30 * 60 * 1000;
 
 function sanitizeLabel(raw: string | null | undefined, fallback = '', max = 96): string {
   if (typeof raw !== 'string') return fallback;
-  const collapsed = raw.replace(/\s+/g, ' ').trim();
-  if (!collapsed) return fallback;
-  const chars = Array.from(collapsed);
-  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : collapsed;
+  const cleaned = raw
+    .replace(/!\[([^\]]*)\]\((?:cindy-media|xdt-image|xdt-file|xdt-video|xdt-audio):\/\/[^)]+\)/gi, (_m, alt: string) =>
+      alt && alt.trim() ? alt.trim() : '[图片]',
+    )
+    .replace(/(?:cindy-media|xdt-image|xdt-file|xdt-video|xdt-audio):\/\/\S+/gi, (uri) =>
+      /\.(png|jpe?g|gif|webp|bmp|svg)(?:$|[?#])/i.test(uri) ? '[图片]' : '[附件]',
+    )
+    .replace(/(?:\[(?:图片|附件)\]\s*){2,}/g, '[图片] ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return fallback;
+  if (cleaned === '[图片]' && fallback) return `${fallback} (图片)`;
+  const chars = Array.from(cleaned);
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : cleaned;
 }
 
 function tryJsonParse(raw: unknown): Record<string, unknown> | null {

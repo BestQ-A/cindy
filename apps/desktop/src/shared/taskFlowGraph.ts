@@ -110,6 +110,8 @@ export interface TaskFlowLineage {
   relatedEdgeIds: Set<string>;
 }
 
+export type TaskFlowDagNodeRole = 'spine' | 'branch' | 'isolated';
+
 export interface PositionedTaskFlowDagNode {
   node: TaskFlowNode;
   layer: number;
@@ -118,6 +120,22 @@ export interface PositionedTaskFlowDagNode {
   y: number;
   width: number;
   height: number;
+  role?: TaskFlowDagNodeRole;
+  chainId?: string;
+}
+
+export interface TaskFlowDagChainGroup {
+  id: string;
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  nodeCount: number;
+  edgeCount: number;
+  spineLength: number;
+  branchCount: number;
+  hasRunning: boolean;
 }
 
 export interface RoutedTaskFlowDagEdge {
@@ -128,6 +146,7 @@ export interface RoutedTaskFlowDagEdge {
   toY: number;
   path: string;
   isBackEdge: boolean;
+  isMainSpine?: boolean;
 }
 
 export interface TaskFlowDagLayout {
@@ -135,6 +154,8 @@ export interface TaskFlowDagLayout {
   height: number;
   nodes: PositionedTaskFlowDagNode[];
   edges: RoutedTaskFlowDagEdge[];
+  chains?: TaskFlowDagChainGroup[];
+  isolatedCount?: number;
 }
 
 export interface TaskFlowSwimlane {
@@ -535,155 +556,346 @@ export function filterTaskFlowGraph(
 }
 
 /**
- * Cycle-safe layered DAG layout using longest-path rank assignment (after
- * breaking cyclic back-edges deterministically) and barycenter row ordering.
+ * Cycle-safe clustered DAG layout:
+ * 1. Partitions connected task chains separately from isolated nodes so isolated
+ *    sessions never form a tall column that hides dependency chains.
+ * 2. Inside each chain, extracts the longest directed critical path as the
+ *    top horizontal "main spine" (row 0) and places branching sub-tasks underneath.
  */
 export function layoutTaskFlowDag(
   nodes: readonly TaskFlowNode[],
   edges: readonly TaskFlowEdge[],
 ): TaskFlowDagLayout {
   if (nodes.length === 0) {
-    return { width: 0, height: 0, nodes: [], edges: [] };
+    return { width: 0, height: 0, nodes: [], edges: [], chains: [], isolatedCount: 0 };
   }
 
   const nodeIds = new Set(nodes.map((n) => n.id));
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const validEdges = edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to) && e.from !== e.to);
-
-  // Detect cycles via DFS in chronological node order and mark back-edges.
   const orderedNodes = [...nodes].sort((a, b) => a.createdAtMs - b.createdAtMs || a.id.localeCompare(b.id));
-  const outgoingAll = new Map<string, TaskFlowEdge[]>();
-  for (const edge of validEdges) {
-    const list = outgoingAll.get(edge.from) ?? [];
-    list.push(edge);
-    outgoingAll.set(edge.from, list);
-  }
 
-  const visitState = new Map<string, 1 | 2>(); // 1=visiting, 2=done
-  const backEdgeIds = new Set<string>();
-
-  const dfs = (id: string) => {
-    visitState.set(id, 1);
-    for (const edge of outgoingAll.get(id) ?? []) {
-      const targetState = visitState.get(edge.to);
-      if (targetState === 1) {
-        backEdgeIds.add(edge.id);
-      } else if (!targetState) {
-        dfs(edge.to);
-      }
+  // Union-Find to group nodes into connected task chains vs isolated nodes
+  const ufParent = new Map<string, string>(orderedNodes.map((n) => [n.id, n.id]));
+  const ufFind = (id: string): string => {
+    let cur = id;
+    while (ufParent.get(cur) !== cur) {
+      const p = ufParent.get(cur)!;
+      ufParent.set(cur, ufParent.get(p)!);
+      cur = p;
     }
-    visitState.set(id, 2);
+    return cur;
   };
+  const ufUnion = (a: string, b: string) => {
+    const ra = ufFind(a);
+    const rb = ufFind(b);
+    if (ra !== rb) ufParent.set(rb, ra);
+  };
+  for (const edge of validEdges) {
+    ufUnion(edge.from, edge.to);
+  }
 
+  const compNodesMap = new Map<string, TaskFlowNode[]>();
   for (const node of orderedNodes) {
-    if (!visitState.has(node.id)) dfs(node.id);
+    const root = ufFind(node.id);
+    const list = compNodesMap.get(root) ?? [];
+    list.push(node);
+    compNodesMap.set(root, list);
   }
 
-  const dagEdges = validEdges.filter((e) => !backEdgeIds.has(e.id));
-  const inDegree = new Map<string, number>();
-  const incomingDag = new Map<string, string[]>();
-  const outgoingDag = new Map<string, string[]>();
-  for (const n of nodes) {
-    inDegree.set(n.id, 0);
-    incomingDag.set(n.id, []);
-    outgoingDag.set(n.id, []);
-  }
-  for (const e of dagEdges) {
-    inDegree.set(e.to, (inDegree.get(e.to) ?? 0) + 1);
-    incomingDag.get(e.to)!.push(e.from);
-    outgoingDag.get(e.from)!.push(e.to);
+  const compEdgesMap = new Map<string, TaskFlowEdge[]>();
+  for (const edge of validEdges) {
+    const root = ufFind(edge.from);
+    const list = compEdgesMap.get(root) ?? [];
+    list.push(edge);
+    compEdgesMap.set(root, list);
   }
 
-  const layerOf = new Map<string, number>();
-  const queue = orderedNodes.filter((n) => (inDegree.get(n.id) ?? 0) === 0).map((n) => n.id);
-  const topo: string[] = [];
+  const multiNodeChains: Array<{ id: string; nodes: TaskFlowNode[]; edges: TaskFlowEdge[] }> = [];
+  const isolatedNodes: TaskFlowNode[] = [];
 
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    topo.push(cur);
-    const curLayer = layerOf.get(cur) ?? 0;
-    for (const next of outgoingDag.get(cur) ?? []) {
-      layerOf.set(next, Math.max(layerOf.get(next) ?? 0, curLayer + 1));
-      const nextDeg = (inDegree.get(next) ?? 0) - 1;
-      inDegree.set(next, nextDeg);
-      if (nextDeg === 0) queue.push(next);
-    }
-  }
-  for (const n of orderedNodes) {
-    if (!layerOf.has(n.id)) layerOf.set(n.id, 0);
-  }
-
-  const layers = new Map<number, TaskFlowNode[]>();
-  for (const node of orderedNodes) {
-    const layer = layerOf.get(node.id) ?? 0;
-    const bucket = layers.get(layer) ?? [];
-    bucket.push(node);
-    layers.set(layer, bucket);
-  }
-
-  const maxLayer = Math.max(0, ...layers.keys());
-  const rowIndex = new Map<string, number>();
-  for (let l = 0; l <= maxLayer; l++) {
-    const bucket = layers.get(l) ?? [];
-    bucket.forEach((n, idx) => rowIndex.set(n.id, idx));
-  }
-
-  // Two barycenter sweeps to reduce crossings
-  for (let sweep = 0; sweep < 2; sweep++) {
-    for (let l = 1; l <= maxLayer; l++) {
-      const bucket = layers.get(l) ?? [];
-      bucket.sort((a, b) => {
-        const parentsA = incomingDag.get(a.id) ?? [];
-        const parentsB = incomingDag.get(b.id) ?? [];
-        const scoreA =
-          parentsA.length > 0
-            ? parentsA.reduce((sum, p) => sum + (rowIndex.get(p) ?? 0), 0) / parentsA.length
-            : (rowIndex.get(a.id) ?? 0);
-        const scoreB =
-          parentsB.length > 0
-            ? parentsB.reduce((sum, p) => sum + (rowIndex.get(p) ?? 0), 0) / parentsB.length
-            : (rowIndex.get(b.id) ?? 0);
-        return scoreA - scoreB || a.createdAtMs - b.createdAtMs;
-      });
-      bucket.forEach((n, idx) => rowIndex.set(n.id, idx));
+  for (const [compId, compNodes] of compNodesMap.entries()) {
+    const compEdges = compEdgesMap.get(compId) ?? [];
+    if (compNodes.length <= 1 && compEdges.length === 0) {
+      isolatedNodes.push(...compNodes);
+    } else {
+      multiNodeChains.push({ id: compId, nodes: compNodes, edges: compEdges });
     }
   }
 
-  let maxRows = 1;
+  // Sort multi-node chains: active/running first, then richer chains, then most recently updated
+  multiNodeChains.sort((a, b) => {
+    const aActive = a.nodes.some((n) => n.status === 'running' || n.status === 'waiting') ? 0 : 1;
+    const bActive = b.nodes.some((n) => n.status === 'running' || n.status === 'waiting') ? 0 : 1;
+    if (aActive !== bActive) return aActive - bActive;
+    if (b.edges.length !== a.edges.length) return b.edges.length - a.edges.length;
+    if (b.nodes.length !== a.nodes.length) return b.nodes.length - a.nodes.length;
+    const aMaxUpd = Math.max(...a.nodes.map((n) => n.updatedAtMs));
+    const bMaxUpd = Math.max(...b.nodes.map((n) => n.updatedAtMs));
+    return bMaxUpd - aMaxUpd;
+  });
+
+  isolatedNodes.sort((a, b) => {
+    const aActive = a.status === 'running' || a.status === 'waiting' ? 0 : 1;
+    const bActive = b.status === 'running' || b.status === 'waiting' ? 0 : 1;
+    if (aActive !== bActive) return aActive - bActive;
+    return b.updatedAtMs - a.updatedAtMs;
+  });
+
+  const CHAIN_HEADER_H = 40;
+  const CHAIN_PAD_X = 20;
+  const CHAIN_PAD_BOTTOM = 20;
+  const CHAIN_GAP = 22;
+  const ISOLATED_COLS = 4;
+
   const positioned: PositionedTaskFlowDagNode[] = [];
   const posById = new Map<string, PositionedTaskFlowDagNode>();
+  const backEdgeIds = new Set<string>();
+  const spineNodeIds = new Set<string>();
+  const chains: TaskFlowDagChainGroup[] = [];
 
-  for (let l = 0; l <= maxLayer; l++) {
-    const bucket = layers.get(l) ?? [];
-    maxRows = Math.max(maxRows, bucket.length);
-    bucket.forEach((node, r) => {
+  let cursorY = DAG_PADDING_Y;
+  let maxStageWidth = DAG_PADDING_X * 2 + DAG_NODE_WIDTH;
+
+  for (let chainIdx = 0; chainIdx < multiNodeChains.length; chainIdx++) {
+    const chain = multiNodeChains[chainIdx];
+    const chainOrdered = [...chain.nodes].sort(
+      (a, b) => a.createdAtMs - b.createdAtMs || a.id.localeCompare(b.id),
+    );
+    const outgoingAll = new Map<string, TaskFlowEdge[]>();
+    for (const edge of chain.edges) {
+      const list = outgoingAll.get(edge.from) ?? [];
+      list.push(edge);
+      outgoingAll.set(edge.from, list);
+    }
+
+    // Cycle detection within chain
+    const visitState = new Map<string, 1 | 2>();
+    const chainBackEdges = new Set<string>();
+    const dfsCycle = (id: string) => {
+      visitState.set(id, 1);
+      for (const edge of outgoingAll.get(id) ?? []) {
+        const st = visitState.get(edge.to);
+        if (st === 1) {
+          chainBackEdges.add(edge.id);
+          backEdgeIds.add(edge.id);
+        } else if (!st) {
+          dfsCycle(edge.to);
+        }
+      }
+      visitState.set(id, 2);
+    };
+    for (const n of chainOrdered) {
+      if (!visitState.has(n.id)) dfsCycle(n.id);
+    }
+
+    const dagEdges = chain.edges.filter((e) => !chainBackEdges.has(e.id));
+    const inDeg = new Map<string, number>();
+    const incomingDag = new Map<string, string[]>();
+    const outgoingDag = new Map<string, string[]>();
+    for (const n of chainOrdered) {
+      inDeg.set(n.id, 0);
+      incomingDag.set(n.id, []);
+      outgoingDag.set(n.id, []);
+    }
+    for (const e of dagEdges) {
+      inDeg.set(e.to, (inDeg.get(e.to) ?? 0) + 1);
+      incomingDag.get(e.to)!.push(e.from);
+      outgoingDag.get(e.from)!.push(e.to);
+    }
+
+    // Longest-path layer assignment from roots
+    const layerOf = new Map<string, number>();
+    const queue = chainOrdered.filter((n) => (inDeg.get(n.id) ?? 0) === 0).map((n) => n.id);
+    const topo: string[] = [];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      topo.push(cur);
+      const curLayer = layerOf.get(cur) ?? 0;
+      for (const nxt of outgoingDag.get(cur) ?? []) {
+        layerOf.set(nxt, Math.max(layerOf.get(nxt) ?? 0, curLayer + 1));
+        const nd = (inDeg.get(nxt) ?? 0) - 1;
+        inDeg.set(nxt, nd);
+        if (nd === 0) queue.push(nxt);
+      }
+    }
+    for (const n of chainOrdered) {
+      if (!layerOf.has(n.id)) layerOf.set(n.id, 0);
+    }
+
+    // Compute longest downstream chain depth per node to identify the main spine
+    const depthMemo = new Map<string, number>();
+    const getDownstreamDepth = (id: string): number => {
+      if (depthMemo.has(id)) return depthMemo.get(id)!;
+      const children = outgoingDag.get(id) ?? [];
+      let best = 1;
+      for (const child of children) {
+        best = Math.max(best, 1 + getDownstreamDepth(child));
+      }
+      depthMemo.set(id, best);
+      return best;
+    };
+    for (const n of chainOrdered) getDownstreamDepth(n.id);
+
+    const minLayer = Math.min(...chainOrdered.map((n) => layerOf.get(n.id) ?? 0));
+    const roots = chainOrdered.filter((n) => (layerOf.get(n.id) ?? 0) === minLayer);
+    roots.sort((a, b) => {
+      const diff = getDownstreamDepth(b.id) - getDownstreamDepth(a.id);
+      if (diff !== 0) return diff;
+      const aAct = a.status === 'running' || a.status === 'waiting' ? 0 : 1;
+      const bAct = b.status === 'running' || b.status === 'waiting' ? 0 : 1;
+      return aAct - bAct || a.createdAtMs - b.createdAtMs;
+    });
+
+    const chainSpineSet = new Set<string>();
+    const chainSpineOrdered: TaskFlowNode[] = [];
+    let curSpine: TaskFlowNode | undefined = roots[0];
+    while (curSpine && !chainSpineSet.has(curSpine.id)) {
+      chainSpineSet.add(curSpine.id);
+      spineNodeIds.add(curSpine.id);
+      chainSpineOrdered.push(curSpine);
+      const children: TaskFlowNode[] = (outgoingDag.get(curSpine.id) ?? [])
+        .map((id) => nodeById.get(id))
+        .filter((n): n is TaskFlowNode => Boolean(n));
+      children.sort((a, b) => {
+        const diff = getDownstreamDepth(b.id) - getDownstreamDepth(a.id);
+        if (diff !== 0) return diff;
+        const aAct = a.status === 'running' || a.status === 'waiting' ? 0 : 1;
+        const bAct = b.status === 'running' || b.status === 'waiting' ? 0 : 1;
+        return aAct - bAct || a.createdAtMs - b.createdAtMs;
+      });
+      curSpine = children[0];
+    }
+
+    // Place spine at row 0, and branches directly below their branching parents without collisions
+    const occupied = new Set<string>();
+    const localRowOf = new Map<string, number>();
+    for (const sp of chainSpineOrdered) {
+      const l = layerOf.get(sp.id) ?? 0;
+      localRowOf.set(sp.id, 0);
+      occupied.add(`${l}:0`);
+    }
+
+    const branchNodes = chainOrdered
+      .filter((n) => !chainSpineSet.has(n.id))
+      .sort(
+        (a, b) =>
+          (layerOf.get(a.id) ?? 0) - (layerOf.get(b.id) ?? 0) || a.createdAtMs - b.createdAtMs,
+      );
+
+    for (const bn of branchNodes) {
+      const l = layerOf.get(bn.id) ?? 0;
+      const parents = incomingDag.get(bn.id) ?? [];
+      let preferredRow = 1;
+      const placedParentRows = parents
+        .filter((p) => localRowOf.has(p))
+        .map((p) => (localRowOf.get(p)! === 0 ? 1 : localRowOf.get(p)!));
+      if (placedParentRows.length > 0) {
+        preferredRow = Math.max(1, Math.min(...placedParentRows));
+      }
+      let r = preferredRow;
+      while (occupied.has(`${l}:${r}`)) {
+        r++;
+      }
+      occupied.add(`${l}:${r}`);
+      localRowOf.set(bn.id, r);
+    }
+
+    const maxLocalLayer = Math.max(0, ...chainOrdered.map((n) => layerOf.get(n.id) ?? 0));
+    const maxLocalRow = Math.max(0, ...chainOrdered.map((n) => localRowOf.get(n.id) ?? 0));
+    const chainRows = maxLocalRow + 1;
+    const chainW =
+      CHAIN_PAD_X * 2 + (maxLocalLayer + 1) * DAG_NODE_WIDTH + maxLocalLayer * DAG_COL_GAP;
+    const chainH =
+      CHAIN_HEADER_H +
+      chainRows * DAG_NODE_HEIGHT +
+      Math.max(0, chainRows - 1) * DAG_ROW_GAP +
+      CHAIN_PAD_BOTTOM;
+
+    const chainId = `chain-${chainIdx + 1}`;
+    const rootTitle = chainSpineOrdered[0]?.title || chainOrdered[0]?.title || chainId;
+    chains.push({
+      id: chainId,
+      title: rootTitle,
+      x: DAG_PADDING_X,
+      y: cursorY,
+      width: chainW,
+      height: chainH,
+      nodeCount: chainOrdered.length,
+      edgeCount: chain.edges.length,
+      spineLength: chainSpineOrdered.length,
+      branchCount: Math.max(0, chainRows - 1),
+      hasRunning: chainOrdered.some((n) => n.status === 'running' || n.status === 'waiting'),
+    });
+
+    for (const n of chainOrdered) {
+      const l = layerOf.get(n.id) ?? 0;
+      const r = localRowOf.get(n.id) ?? 0;
       const item: PositionedTaskFlowDagNode = {
-        node,
+        node: n,
         layer: l,
         row: r,
-        x: DAG_PADDING_X + l * (DAG_NODE_WIDTH + DAG_COL_GAP),
-        y: DAG_PADDING_Y + r * (DAG_NODE_HEIGHT + DAG_ROW_GAP),
+        x: DAG_PADDING_X + CHAIN_PAD_X + l * (DAG_NODE_WIDTH + DAG_COL_GAP),
+        y: cursorY + CHAIN_HEADER_H + r * (DAG_NODE_HEIGHT + DAG_ROW_GAP),
         width: DAG_NODE_WIDTH,
         height: DAG_NODE_HEIGHT,
+        role: chainSpineSet.has(n.id) ? 'spine' : 'branch',
+        chainId,
       };
       positioned.push(item);
-      posById.set(node.id, item);
+      posById.set(n.id, item);
+    }
+
+    maxStageWidth = Math.max(maxStageWidth, DAG_PADDING_X * 2 + chainW);
+    cursorY += chainH + CHAIN_GAP;
+  }
+
+  // Place isolated (no-dependency) nodes in a compact grid below all dependency chains
+  if (isolatedNodes.length > 0) {
+    const isoHeaderY = cursorY;
+    const isoStartY = isoHeaderY + 34;
+    const isoGapX = 20;
+    const isoGapY = 16;
+    isolatedNodes.forEach((n, idx) => {
+      const col = idx % ISOLATED_COLS;
+      const row = Math.floor(idx / ISOLATED_COLS);
+      const item: PositionedTaskFlowDagNode = {
+        node: n,
+        layer: col,
+        row,
+        x: DAG_PADDING_X + col * (DAG_NODE_WIDTH + isoGapX),
+        y: isoStartY + row * (DAG_NODE_HEIGHT + isoGapY),
+        width: DAG_NODE_WIDTH,
+        height: DAG_NODE_HEIGHT,
+        role: 'isolated',
+        chainId: 'isolated',
+      };
+      positioned.push(item);
+      posById.set(n.id, item);
     });
+    const isoRows = Math.ceil(isolatedNodes.length / ISOLATED_COLS);
+    const isoGridW =
+      DAG_PADDING_X * 2 +
+      Math.min(isolatedNodes.length, ISOLATED_COLS) * DAG_NODE_WIDTH +
+      Math.max(0, Math.min(isolatedNodes.length, ISOLATED_COLS) - 1) * isoGapX;
+    maxStageWidth = Math.max(maxStageWidth, isoGridW);
+    cursorY = isoStartY + isoRows * DAG_NODE_HEIGHT + Math.max(0, isoRows - 1) * isoGapY + DAG_PADDING_Y;
   }
 
   const routedEdges: RoutedTaskFlowDagEdge[] = validEdges.flatMap((edge): RoutedTaskFlowDagEdge[] => {
     const src = posById.get(edge.from);
     const dst = posById.get(edge.to);
     if (!src || !dst) return [];
+    const isMainSpine = spineNodeIds.has(edge.from) && spineNodeIds.has(edge.to);
     const isBack = backEdgeIds.has(edge.id) || src.layer >= dst.layer;
     if (isBack) {
       const fromX = src.x + src.width / 2;
       const fromY = src.y + src.height;
       const toX = dst.x + dst.width / 2;
       const toY = dst.y + dst.height;
-      const dropY = Math.max(fromY, toY) + 34;
+      const dropY = Math.max(fromY, toY) + 28;
       const path = `M ${fromX} ${fromY} C ${fromX} ${dropY}, ${toX} ${dropY}, ${toX} ${toY}`;
-      return [{ edge, fromX, fromY, toX, toY, path, isBackEdge: true }];
+      return [{ edge, fromX, fromY, toX, toY, path, isBackEdge: true, isMainSpine }];
     }
     const fromX = src.x + src.width;
     const fromY = src.y + src.height / 2;
@@ -691,17 +903,16 @@ export function layoutTaskFlowDag(
     const toY = dst.y + dst.height / 2;
     const midX = (fromX + toX) / 2;
     const path = `M ${fromX} ${fromY} C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`;
-    return [{ edge, fromX, fromY, toX, toY, path, isBackEdge: false }];
+    return [{ edge, fromX, fromY, toX, toY, path, isBackEdge: false, isMainSpine }];
   });
 
-  // Preserve deterministic unused map ref suppression cleanly
-  void nodeById;
-
   return {
-    width: DAG_PADDING_X * 2 + (maxLayer + 1) * DAG_NODE_WIDTH + maxLayer * DAG_COL_GAP,
-    height: DAG_PADDING_Y * 2 + maxRows * DAG_NODE_HEIGHT + Math.max(0, maxRows - 1) * DAG_ROW_GAP + 36,
+    width: maxStageWidth,
+    height: Math.max(240, cursorY + 12),
     nodes: positioned,
     edges: routedEdges,
+    chains,
+    isolatedCount: isolatedNodes.length,
   };
 }
 
