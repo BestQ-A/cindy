@@ -107,6 +107,8 @@ export interface CompanionCloudRuntime {
   homeChoices: (botId: string) => Promise<CompanionHomeChoices>;
   /** Move the companion to `targetDeviceId` from any computer: hand over here, ask its home, or take over. */
   switchHome: (botId: string, targetDeviceId: string, options?: CompanionSwitchOptions) => Promise<CompanionCloudActionResult>;
+  /** Bring the companion back to run on this computer (hand over when reachable, flush + take over if remote control is off, or take over when offline). */
+  claimHere: (botId: string) => Promise<CompanionCloudActionResult>;
   transcript: (botId: string, before?: string) => Promise<CompanionTranscriptPage>;
   /** Import a server-delivered private report into the same local companion timeline. */
   receivePrivateReport: (botId: string) => Promise<boolean>;
@@ -237,26 +239,40 @@ export function startCompanionCloud(input: {
   const refreshForeground = input.refreshForeground ?? input.refresh;
   const state = input.host.openState(input.endpoint, input.humanActorId, input.current);
   const roomName = (botId: string) => input.bots().find(bot => bot.botId === botId)?.name ?? '';
+  const refusedSkillFiles = new Map<string, Set<string>>();
   const store = input.store ? createCompanionStore(input.api, input.store) : undefined;
   const uploader = createCompanionUploader({ api: input.api, state, log: input.log, store,
-    readValues: async (botId, actorId) => resolveCompanionSkillFiles(await input.host.readValues(botId), {
-      known: sha256 => state.bot(botId)?.skillFileMedia?.[sha256],
-      gaps: state.bot(botId)?.skillFileGaps ?? {},
-      ...(input.media ? { upload: async file => {
-        const roomId = await mirror.ensureRoom(botId, actorId, roomName(botId));
-        // As the owner: a room file with no message is readable only by whoever uploaded it.
-        const [block] = await input.media!.upload(roomId, `skill-file:${file.sha256}`, [{ id: file.sha256, name: file.name, category: 'file',
-          mimeType: 'application/octet-stream', size: file.size, url: null, path: file.path }], input.humanActorId);
-        if (!block?.mediaId) throw new Error('ATTACHMENT_UNAVAILABLE');
-        return block.mediaId;
-      } } : {}),
-      retain: (media, gaps) => {
-        const known = state.bot(botId);
-        if (canonicalJson([media, gaps]) === canonicalJson([known?.skillFileMedia ?? {}, known?.skillFileGaps ?? {}])) return;
-        state.update(botId, actorId, entry => { entry.skillFileMedia = media; entry.skillFileGaps = gaps; });
-      },
-      ...(input.log ? { log: input.log } : {}),
-    }),
+    readValues: async (botId, actorId) => {
+      let refused = refusedSkillFiles.get(botId);
+      if (!refused) { refused = new Set(); refusedSkillFiles.set(botId, refused); }
+      return resolveCompanionSkillFiles(await input.host.readValues(botId), {
+        known: sha256 => state.bot(botId)?.skillFileMedia?.[sha256],
+        gaps: state.bot(botId)?.skillFileGaps ?? {},
+        refused,
+        ...(input.media ? { upload: async file => {
+          const roomId = await mirror.ensureRoom(botId, actorId, roomName(botId));
+          // As the owner: a room file with no message is readable only by whoever uploaded it.
+          try {
+            const [block] = await input.media!.upload(roomId, `skill-file:${roomId}:${file.sha256}`, [{ id: file.sha256, name: file.name, category: 'file',
+              mimeType: 'application/octet-stream', size: file.size, url: null, path: file.path }], input.humanActorId);
+            if (!block?.mediaId) throw new Error('ATTACHMENT_UNAVAILABLE');
+            return block.mediaId;
+          } catch (error) {
+            if (chatRejection(error, 404, 'CONVERSATION_NOT_FOUND')) {
+              state.update(botId, actorId, entry => { delete entry.roomId; delete entry.skillFileMedia; });
+              throw Object.assign(new Error('REQUEST_TIMEOUT'), { status: 503 });
+            }
+            throw error;
+          }
+        } } : {}),
+        retain: (media, gaps) => {
+          const known = state.bot(botId);
+          if (canonicalJson([media, gaps]) === canonicalJson([known?.skillFileMedia ?? {}, known?.skillFileGaps ?? {}])) return;
+          state.update(botId, actorId, entry => { entry.skillFileMedia = media; entry.skillFileGaps = gaps; });
+        },
+        ...(input.log ? { log: input.log } : {}),
+      });
+    },
     confirmHome: async (_botId, actorId) => {
       const actors = await input.api<CompanionRuntimeActor[]>('/actors');
       return actors.find(actor => actor.id === actorId)?.homeDeviceId === input.selfDeviceId;
@@ -293,7 +309,7 @@ export function startCompanionCloud(input: {
   };
 
   /** Explicit home actions must leave a diagnostic, without logging response text or paths. */
-  function homeActionFailure(action: 'takeOver' | 'transfer' | 'switchHome', botId: string, error: unknown,
+  function homeActionFailure(action: 'takeOver' | 'transfer' | 'switchHome' | 'claimHere', botId: string, error: unknown,
     fallback: 'FAILED' | 'OFFLINE' = 'FAILED'): CompanionCloudActionResult {
     const result = actionFailure(error, fallback);
     const reason = errorCode(error);
@@ -913,6 +929,42 @@ export function startCompanionCloud(input: {
       if (!result.ok) homeActionFailure('switchHome', botId, new Error(result.code));
       publish();
       return result;
+    },
+
+    async claimHere(botId) {
+      const self = input.selfDeviceId;
+      if (!self || !live()) return { ok: false, code: 'NOT_ENABLED' };
+      let actor = actorOf(botId);
+      if (!actor) {
+        try { await refreshForeground?.(); } catch (error) { return homeActionFailure('claimHere', botId, error); }
+        actor = actorOf(botId);
+      }
+      if (!actor) return homeActionFailure('claimHere', botId, new Error('COMPANION_NOT_FOUND'));
+      if (actor.homeDeviceId === self) return runtime.isShadowed(botId) ? runtime.takeOver(botId) : { ok: true };
+      const choices = await runtime.homeChoices(botId);
+      if (choices.homeDeviceId === self || choices.mode === 'local') {
+        return runtime.isShadowed(botId) ? runtime.takeOver(botId) : { ok: true };
+      }
+      if (choices.mode === 'unavailable') return { ok: false, code: choices.reason === 'HOME_OUTDATED' ? 'HOME_OUTDATED' : 'FAILED' };
+      if (choices.mode === 'takeOver') return runtime.takeOver(botId);
+      if (choices.targets.some(target => target.deviceId === self)) return runtime.switchHome(botId, self);
+      // Remote control is off on this computer so the home will not offer us as a handOver target;
+      // ask the home to flush its backlog, then take over directly.
+      if (input.host.homeLink?.flush && choices.homeDeviceId) {
+        let flushed: CompanionCloudActionResult;
+        try { flushed = await input.host.homeLink.flush(choices.homeDeviceId, botId); }
+        catch (error) {
+          await refreshForeground?.().catch(() => undefined);
+          publish();
+          return homeActionFailure('claimHere', botId, error, 'OFFLINE');
+        }
+        if (!flushed.ok) {
+          homeActionFailure('claimHere', botId, new Error(flushed.code));
+          publish();
+          return flushed;
+        }
+      }
+      return runtime.takeOver(botId);
     },
 
     async receivePrivateReport(botId) {

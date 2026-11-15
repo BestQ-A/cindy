@@ -147,4 +147,26 @@ describe('chat private media', () => {
     await expect(createChatMedia(api, () => true, 'https://chat.example.test', undefined, { allowLoopback: true }).upload('room','op',[attachment],'actor')).rejects.toThrow('INVALID_MEDIA_URL');
   });
 
+  it('scopes upload operationId to room, filename, and mimeType while keeping same-room retries idempotent', async () => {
+    f.read.mockResolvedValue({ buffer: Buffer.from('skill-bytes') });
+    f.fetch.mockResolvedValue(new Response('', { status: 200 }));
+    const ops: string[] = [];
+    const api = vi.fn(async (route: string, _method: string, body: { operationId?: string }) => {
+      if (route.endsWith('/media')) {
+        ops.push(body.operationId ?? '');
+        return { id: `media-${ops.length}`, uploadUrl: 'https://upload.example.test/signed' };
+      }
+      return {};
+    }) as unknown as ChatApi;
+    const media = createChatMedia(api, () => true, 'https://chat.example.test');
+    await media.upload('room-a', 'shared-source', [attachment], 'actor');
+    await media.upload('room-b', 'shared-source', [attachment], 'actor');
+    await media.upload('room-a', 'shared-source', [{ ...attachment, name: 'other.md' }], 'actor');
+    await media.upload('room-a', 'shared-source', [{ ...attachment, mimeType: 'text/plain' }], 'actor');
+    await media.upload('room-a', 'shared-source', [attachment], 'actor');
+    expect(ops).toHaveLength(5);
+    expect(new Set(ops.slice(0, 4)).size).toBe(4);
+    expect(ops[4]).toBe(ops[0]);
+  });
+
 });

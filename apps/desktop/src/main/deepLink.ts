@@ -73,6 +73,7 @@ const URL_PREFIX = DEEP_LINK_URL_PREFIX;
 /** Windows 右键菜单 / 命令行入口的 flag。值是绝对路径,argv 透传不编解码。 */
 export const OPEN_FOLDER_FLAG = '--open-folder';
 export const OPEN_SHARE_FILE_FLAG = '--open-share-file';
+export const CLAIM_COMPANION_HOME_FLAG = '--claim-companion-home';
 
 export type DeepLinkPayload =
   | { type: 'chat-invite'; token: string }
@@ -664,6 +665,29 @@ export function findOpenFolderInArgv(argv: readonly string[]): string | null {
 
 export function findOpenShareFileInArgv(argv: readonly string[]): string | null {
   return findAbsolutePathAfterFlag(argv, OPEN_SHARE_FILE_FLAG);
+}
+
+const CLAIM_COMPANION_HOME_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+
+/** Find `--claim-companion-home <botId>` or `--claim-companion-home=<botId>` in argv. */
+export function findClaimCompanionHomeInArgv(argv: readonly string[]): string | null {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (typeof arg !== 'string') continue;
+    if (arg === CLAIM_COMPANION_HOME_FLAG) {
+      for (let j = i + 1; j < argv.length; j++) {
+        const candidate = argv[j];
+        if (typeof candidate !== 'string' || isWindowsSlashSwitch(candidate)) continue;
+        return CLAIM_COMPANION_HOME_ID_RE.test(candidate) ? candidate : null;
+      }
+      return null;
+    }
+    if (arg.startsWith(`${CLAIM_COMPANION_HOME_FLAG}=`)) {
+      const value = arg.slice(CLAIM_COMPANION_HOME_FLAG.length + 1);
+      return CLAIM_COMPANION_HOME_ID_RE.test(value) ? value : null;
+    }
+  }
+  return null;
 }
 
 function findAbsolutePathAfterFlag(argv: readonly string[], flag: string): string | null {

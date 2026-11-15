@@ -1197,13 +1197,19 @@ async function prepareSourceMarketplace(
   let reason: string | undefined;
   let changed = false;
 
+  let activeOverlays = overlays;
+
   if (!cacheReady) {
     status = 'error';
     reason = 'isolated plugin cache is unavailable';
   } else {
     try {
-      if (overlays && overlays.length > 0) {
-        status = await ensureOverlayMarketplace(source, link, overlays, warnings);
+      if (activeOverlays && activeOverlays.length > 0) {
+        const installedPlugins = new Set(await listDirectoryNames(source));
+        activeOverlays = activeOverlays.filter((overlay) => installedPlugins.has(overlay.pluginName));
+      }
+      if (activeOverlays && activeOverlays.length > 0) {
+        status = await ensureOverlayMarketplace(source, link, activeOverlays, warnings);
         changed = status === 'linked';
       } else {
         changed = await removeManagedOverlayDirectory(link, source, warnings);
@@ -1219,7 +1225,7 @@ async function prepareSourceMarketplace(
     }
   }
 
-  if (status === 'error' && (!overlays || overlays.length === 0)) {
+  if (status === 'error' && (!activeOverlays || activeOverlays.length === 0)) {
     warnings.push(
       `cannot link codex plugin marketplace cache ${name} from ${source}: ${reason ?? 'unknown error'}`,
     );

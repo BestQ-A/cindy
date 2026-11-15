@@ -276,6 +276,30 @@ describe('skill files', () => {
     expect(value.omitted.length).toBeGreaterThan(0);
     expect(value.files.length + value.omitted.length === 800 || value.truncated === true).toBe(true);
   });
+
+  it('memoizes non-transient upload refusals until file content changes', async () => {
+    const retain = vi.fn();
+    const refused = new Set<string>();
+    const upload = vi.fn(async () => { throw rejection(409, 'OPERATION_CONFLICT'); });
+    const first = await resolveCompanionSkillFiles([{ key, value: null, localFiles: [local('a.py')] }], { known: () => undefined, upload, refused, retain });
+    expect(first[0]?.value).toEqual({ slug: 'brew', files: [], omitted: ['scripts/a.py'] });
+    expect(upload).toHaveBeenCalledTimes(1);
+
+    const second = await resolveCompanionSkillFiles([{ key, value: null, localFiles: [local('a.py')] }], { known: () => undefined, upload, refused, retain });
+    expect(second[0]?.value).toEqual({ slug: 'brew', files: [], omitted: ['scripts/a.py'] });
+    expect(upload).toHaveBeenCalledTimes(1);
+
+    const transient = vi.fn(async () => { throw rejection(503, 'SERVICE_UNAVAILABLE'); });
+    const transientSet = new Set<string>();
+    await resolveCompanionSkillFiles([{ key, value: null, localFiles: [local('a.py')] }], { known: () => undefined, upload: transient, refused: transientSet, retain });
+    await resolveCompanionSkillFiles([{ key, value: null, localFiles: [local('a.py')] }], { known: () => undefined, upload: transient, refused: transientSet, retain });
+    expect(transient).toHaveBeenCalledTimes(2);
+
+    const uploadAfterEdit = vi.fn(async () => 'media-new');
+    const edited = await resolveCompanionSkillFiles([{ key, value: null, localFiles: [{ ...local('a.py'), sha256: 'sha-a.py-v2' }] }], { known: () => undefined, upload: uploadAfterEdit, refused, retain });
+    expect(uploadAfterEdit).toHaveBeenCalledTimes(1);
+    expect(edited[0]?.value).toMatchObject({ files: [{ path: 'scripts/a.py', sha256: 'sha-a.py-v2', mediaId: 'media-new' }] });
+  });
 });
 
 describe('companion store', () => {

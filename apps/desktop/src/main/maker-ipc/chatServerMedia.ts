@@ -106,7 +106,7 @@ export function createChatMedia(api: ChatApi, current: () => boolean, endpoint: 
             : attachment.path ? await fs.readFile(attachment.path) : null;
           await checkFile();
           if (!bytes || !bytes.length || bytes.length > MAX_SIZE) throw new Error('ATTACHMENT_UNAVAILABLE');
-          const key = createHash('sha256').update(source).update(attachment.id).update(bytes).digest('hex');
+          const key = createHash('sha256').update(JSON.stringify([roomId, source, attachment.id, attachment.name, attachment.mimeType])).update(bytes).digest('hex');
           // Expired abandoned uploads must get a new prepare receipt, but a successful
           // message keeps the same content even when the request's ACK was lost.
           let upload: { id: string; uploadUrl: string };

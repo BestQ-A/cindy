@@ -1104,10 +1104,12 @@ import {
   redactConsumedDeepLinkInArgv,
   findOpenFolderInArgv,
   findOpenShareFileInArgv,
+  findClaimCompanionHomeInArgv,
   setDeepLinkMainWindow,
   focusMainWindow as activateMainWindow,
   takePendingDeepLinkFromRenderer,
 } from './deepLink.js';
+import { activeCompanionCloud } from './companion-cloud/runtime.js';
 import { createMakeTestWindowBehavior } from './cindy-make/testWindowBehavior.js';
 import { registerFolderContextMenu } from './folderContextMenu.js';
 import { healWindowsShortcuts } from './windowsShortcutSelfHeal.js';
@@ -4197,6 +4199,39 @@ app.on('open-file', (event, filePath) => {
   handleIncomingOpenFolder(filePath, 'open-file');
 });
 
+const companionClaimLog = createLogger('companion-cloud:claim-home');
+
+function handleIncomingClaimCompanionHome(
+  botId: string,
+  source: 'second-instance' | 'cold-start-argv',
+): void {
+  void (async () => {
+    let cloud = activeCompanionCloud();
+    if (!cloud) {
+      for (let attempt = 0; attempt < 60 && !cloud; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        cloud = activeCompanionCloud();
+      }
+    }
+    if (!cloud) {
+      companionClaimLog.warn('Companion claim skipped: cloud sync not active', { botId, source });
+      return;
+    }
+    const result = await cloud.claimHere(botId);
+    if (result.ok) {
+      companionClaimLog.info('Companion home claimed locally', { botId, source });
+    } else {
+      companionClaimLog.warn('Companion home claim failed', { botId, source, ...result });
+    }
+  })().catch((error) => {
+    companionClaimLog.warn('Companion home claim errored', {
+      botId,
+      source,
+      message: String(error),
+    });
+  });
+}
+
 // ── Single instance lock ─────────────────────────────────────────────────
 // 正常 dev 与 packaged 一律启用。这是把 OS 因深链(cindy://focus 授权返回 /
 // cindy://session 等)/ 右键 "通过 Cindy 打开" 而拉起的第二个进程 redirect 成
@@ -4268,6 +4303,11 @@ if (
       // 给了两种,优先 deep link URL (历史语义先行,xdt-maker:// 比 --open-folder
       // 早一个版本上线),避免双 dispatch / 双 navigate 让 renderer 看到一闪而过
       // 的中间态。
+      const claimBotId = findClaimCompanionHomeInArgv(argv);
+      if (claimBotId) {
+        handleIncomingClaimCompanionHome(claimBotId, 'second-instance');
+        return;
+      }
       const url = findDeepLinkInArgv(argv);
       if (url) {
         redactConsumedDeepLinkInArgv(argv, url);
@@ -4315,23 +4355,28 @@ if (
 //
 // 同 second-instance:两类入口互斥, 优先 deep link URL。
 if (process.platform !== 'darwin') {
-  const coldStartUrl = findDeepLinkInArgv(process.argv);
-  if (coldStartUrl) {
-    redactConsumedDeepLinkInArgv(process.argv, coldStartUrl);
-    handleIncomingDeepLink(coldStartUrl, 'cold-start-argv');
+  const coldStartClaimBotId = findClaimCompanionHomeInArgv(process.argv);
+  if (coldStartClaimBotId) {
+    handleIncomingClaimCompanionHome(coldStartClaimBotId, 'cold-start-argv');
   } else {
-    const coldStartOpenFolder = findOpenFolderInArgv(process.argv);
-    if (coldStartOpenFolder) {
-      handleIncomingOpenFolder(coldStartOpenFolder, 'cold-start-argv');
+    const coldStartUrl = findDeepLinkInArgv(process.argv);
+    if (coldStartUrl) {
+      redactConsumedDeepLinkInArgv(process.argv, coldStartUrl);
+      handleIncomingDeepLink(coldStartUrl, 'cold-start-argv');
     } else {
-      // 双击已关联的 .cindy 冷启动(Windows):装入发生在窗口创建前,首帧
-      // listSync 即含新意识,面板第一帧就位(规则 7)。
-      const coldStartShareFile = findOpenShareFileInArgv(process.argv);
-      if (coldStartShareFile) {
-        handleIncomingShareFile(coldStartShareFile, 'cold-start-argv');
+      const coldStartOpenFolder = findOpenFolderInArgv(process.argv);
+      if (coldStartOpenFolder) {
+        handleIncomingOpenFolder(coldStartOpenFolder, 'cold-start-argv');
       } else {
-        const coldStartCindy = findCindyFileInArgv(process.argv);
-        if (coldStartCindy) void handleIncomingCindyFile(coldStartCindy, 'cold-start-argv');
+        // 双击已关联的 .cindy 冷启动(Windows):装入发生在窗口创建前,首帧
+        // listSync 即含新意识,面板第一帧就位(规则 7)。
+        const coldStartShareFile = findOpenShareFileInArgv(process.argv);
+        if (coldStartShareFile) {
+          handleIncomingShareFile(coldStartShareFile, 'cold-start-argv');
+        } else {
+          const coldStartCindy = findCindyFileInArgv(process.argv);
+          if (coldStartCindy) void handleIncomingCindyFile(coldStartCindy, 'cold-start-argv');
+        }
       }
     }
   }

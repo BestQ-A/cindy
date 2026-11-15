@@ -649,6 +649,36 @@ describe('switch home from any computer', () => {
     expect((await t.runtime.switchHome('bot_mia', 'tablet')).ok).toBe(false);
     expect(t.refresh).toHaveBeenCalled();
   });
+
+  it('claims a companion home from an online remote host via handOver', async () => {
+    const homeLink = link(2);
+    const t = setup({ home: 'laptop', devices: [device('laptop'), device('desk', { isSelf: true, name: 'Desk' })], homeLink });
+    expect(await t.runtime.claimHere('bot_mia')).toEqual({ ok: true });
+    expect(homeLink.handOver).toHaveBeenCalledWith('laptop', 'bot_mia', 'desk', undefined);
+    expect(t.calls.some(call => call.method === 'PATCH')).toBe(false);
+  });
+
+  it('flushes the remote host before taking over when this computer disables remote control', async () => {
+    const flush = vi.fn(async () => ({ ok: true as const }));
+    const homeLink = { ...link(2, [{ deviceId: 'tablet', name: 'Tablet', online: true }]), flush };
+    const t = setup({ home: 'laptop', devices: [device('laptop'), device('desk', { isSelf: true, name: 'Desk', remoteControlEnabled: false })], homeLink });
+    expect(await t.runtime.claimHere('bot_mia')).toEqual({ ok: true });
+    expect(flush).toHaveBeenCalledWith('laptop', 'bot_mia');
+    expect(homeLink.handOver).not.toHaveBeenCalled();
+    expect(t.calls.find(call => call.method === 'PATCH')).toMatchObject({ data: { homeDeviceId: 'desk', expectedHomeDeviceId: 'laptop' } });
+    expect(t.state.isDemoted('bot_mia')).toBe(false);
+  });
+
+  it('takes over directly when the current home is offline', async () => {
+    const flush = vi.fn(async () => ({ ok: true as const }));
+    const homeLink = { ...link(2), flush };
+    const t = setup({ home: 'laptop', devices: [device('laptop', { online: false }), device('desk', { isSelf: true, name: 'Desk' })], homeLink });
+    expect(await t.runtime.claimHere('bot_mia')).toEqual({ ok: true });
+    expect(flush).not.toHaveBeenCalled();
+    expect(homeLink.handOver).not.toHaveBeenCalled();
+    expect(t.calls.find(call => call.method === 'PATCH')).toMatchObject({ data: { homeDeviceId: 'desk', expectedHomeDeviceId: 'laptop' } });
+    expect(t.state.isDemoted('bot_mia')).toBe(false);
+  });
 });
 
 describe('transcript', () => {

@@ -40,9 +40,11 @@ import {
   redactConsumedDeepLinkInArgv,
   findOpenFolderInArgv,
   findOpenShareFileInArgv,
+  findClaimCompanionHomeInArgv,
   DEEP_LINK_PROTOCOL,
   OPEN_FOLDER_FLAG,
   OPEN_SHARE_FILE_FLAG,
+  CLAIM_COMPANION_HOME_FLAG,
   focusMainWindow,
   handleIncomingDeepLink,
   openMainWindowVoiceSettings,
@@ -862,6 +864,36 @@ describe('findOpenShareFileInArgv', () => {
         '/tmp/team.cshare',
       ]),
     ).toBe('/tmp/team.cshare');
+  });
+});
+
+describe('CLI --claim-companion-home parsing', () => {
+  it('parses both --claim-companion-home=<botId> and --claim-companion-home <botId>', () => {
+    expect(
+      findClaimCompanionHomeInArgv(['CindyPrivacyCN.exe', `${CLAIM_COMPANION_HOME_FLAG}=cindy-default`]),
+    ).toBe('cindy-default');
+    expect(
+      findClaimCompanionHomeInArgv(['CindyPrivacyCN.exe', CLAIM_COMPANION_HOME_FLAG, 'bot_1:abc.2']),
+    ).toBe('bot_1:abc.2');
+  });
+
+  it('skips Windows Chromium slash switches before reading the companion id', () => {
+    expect(
+      findClaimCompanionHomeInArgv([
+        'CindyPrivacyCN.exe',
+        CLAIM_COMPANION_HOME_FLAG,
+        '/prefetch:1',
+        'cindy-default',
+      ]),
+    ).toBe('cindy-default');
+  });
+
+  it('returns null when missing or given an invalid companion id', () => {
+    expect(findClaimCompanionHomeInArgv(['CindyPrivacyCN.exe', CLAIM_COMPANION_HOME_FLAG])).toBeNull();
+    expect(findClaimCompanionHomeInArgv(['CindyPrivacyCN.exe', `${CLAIM_COMPANION_HOME_FLAG}=`])).toBeNull();
+    expect(findClaimCompanionHomeInArgv(['CindyPrivacyCN.exe', CLAIM_COMPANION_HOME_FLAG, '../bad'])).toBeNull();
+    expect(findClaimCompanionHomeInArgv(['CindyPrivacyCN.exe', `${CLAIM_COMPANION_HOME_FLAG}=bad/id`])).toBeNull();
+    expect(findClaimCompanionHomeInArgv(['CindyPrivacyCN.exe', CLAIM_COMPANION_HOME_FLAG, '--other', 'cindy-default'])).toBeNull();
   });
 });
 

@@ -51,6 +51,8 @@ export async function resolveCompanionSkillFiles(values: CompanionPreferenceValu
   known: (sha256: string) => string | undefined;
   upload?: (file: { name: string; size: number; path: string; sha256: string }) => Promise<string>;
   gaps?: CompanionSkillFileGaps;
+  /** Non-transient upload failures keyed by `${sha256}\n${name}`; skipped until content changes. */
+  refused?: Set<string>;
   /** The uploads and gaps still in use after this pass; anything else is forgotten. */
   retain: (media: Record<string, string>, gaps: CompanionSkillFileGaps) => void;
   log?: CompanionLog;
@@ -88,14 +90,18 @@ export async function resolveCompanionSkillFiles(values: CompanionPreferenceValu
     let retry = false;
     for (const { absolutePath, ...file } of entry.localFiles) {
       if (deps.gaps?.[slug]?.stale?.[file.path] === file.sha256) { stale[file.path] = file.sha256; omitted.push(file.path); continue; }
+      const name = file.path.split('/').pop()!;
+      const refusalKey = `${file.sha256}\n${name}`;
       let mediaId = file.size === 0 ? '' : deps.known(file.sha256) ?? inUse[file.sha256];
       if (mediaId === undefined && !storageMissing) {
+        if (deps.refused?.has(refusalKey)) { omitted.push(file.path); continue; }
         try {
-          mediaId = await deps.upload!({ name: file.path.split('/').pop()!, size: file.size, path: absolutePath, sha256: file.sha256 });
+          mediaId = await deps.upload!({ name, size: file.size, path: absolutePath, sha256: file.sha256 });
         } catch (error) {
           // A server without file storage refuses every file; asking once per pass is enough.
           if (chatRejection(error, 503, 'MEDIA_STORAGE_UNAVAILABLE')) storageMissing = true;
           else if (isTransientAttachmentFailure(error)) { retry = true; break; }
+          else deps.refused?.add(refusalKey);
           deps.log?.warn('Companion skill file not uploaded', { code: errorCode(error) });
         }
       }

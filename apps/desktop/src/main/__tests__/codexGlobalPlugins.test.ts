@@ -1042,6 +1042,77 @@ describe('prepareCodexGlobalPluginsBridge', () => {
     await expect(fs.lstat(overlay)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('links a marketplace directly without warning when a policy-overlaid plugin is not installed', async () => {
+    const { homeDir, codexHome, paths } = await setup();
+    await writePluginCache(paths.sourceCacheDir, 'personal', 'vista');
+
+    const result = await prepareCodexGlobalPluginsBridge(codexHome, {
+      homeDir,
+      capabilityRouting: explicitOnlySkillPolicy('feishu-delegate', 'personal'),
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect(result.routingFailures).toEqual([]);
+    expect(result.marketplaces).toEqual([
+      expect.objectContaining({ name: 'personal', status: 'linked' }),
+    ]);
+    expect(
+      await sameRealPath(
+        path.join(paths.cacheDir, 'personal'),
+        path.join(paths.sourceCacheDir, 'personal'),
+      ),
+    ).toBe(true);
+  });
+
+  it('replaces a managed overlay with a direct link when the overlaid plugin is uninstalled', async () => {
+    const { homeDir, codexHome, paths } = await setup();
+    const marketplace = 'personal';
+    const plugin = 'feishu-delegate';
+    const version = '0.1.0';
+    const skill = 'message-feishu-coworkers';
+    await writePluginCache(paths.sourceCacheDir, marketplace, plugin, version);
+    await writePluginCache(paths.sourceCacheDir, marketplace, 'vista', version);
+    const skillDir = path.join(
+      paths.sourceCacheDir,
+      marketplace,
+      plugin,
+      version,
+      'skills',
+      skill,
+    );
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---\nname: ${skill}\ndescription: Feishu\n---\n`,
+      'utf8',
+    );
+    const capabilityRouting = explicitOnlySkillPolicy(plugin, marketplace, skill);
+
+    await prepareCodexGlobalPluginsBridge(codexHome, { homeDir, capabilityRouting });
+    const linkPath = path.join(paths.cacheDir, marketplace);
+    expect((await fs.lstat(linkPath)).isSymbolicLink()).toBe(false);
+
+    await fs.rm(path.join(paths.sourceCacheDir, marketplace, plugin), {
+      recursive: true,
+      force: true,
+    });
+    const result = await prepareCodexGlobalPluginsBridge(codexHome, {
+      homeDir,
+      capabilityRouting,
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.warnings).toEqual([]);
+    expect(result.routingFailures).toEqual([]);
+    expect(result.marketplaces).toEqual([
+      expect.objectContaining({ name: marketplace, status: 'kept' }),
+    ]);
+    expect((await fs.lstat(linkPath)).isSymbolicLink()).toBe(true);
+    expect(
+      await sameRealPath(linkPath, path.join(paths.sourceCacheDir, marketplace)),
+    ).toBe(true);
+  });
+
   it('skips plugin entries whose marketplace has no cache dir', async () => {
     const { homeDir, codexHome, paths } = await setup();
     await writePluginCache(paths.sourceCacheDir, 'superpowers-dev', 'superpowers');
