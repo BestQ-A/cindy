@@ -1259,6 +1259,22 @@ function findChildFolderByName(
     .find((f) => f.name.toLowerCase() === lowered);
 }
 
+function fnv1a32(input: string, seed: number): number {
+  let hash = seed >>> 0;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function deterministicPathFolderId(segmentsPrefix: readonly string[]): string {
+  const canonical = segmentsPrefix.map((seg) => seg.trim().toLowerCase()).join('\u0000');
+  const h1 = fnv1a32(canonical, 0x811c9dc5).toString(16).padStart(8, '0');
+  const h2 = fnv1a32(canonical, 0x9e3779b1).toString(16).padStart(8, '0');
+  return `fld-${h1}${h2}`;
+}
+
 function ensureFolderPath(
   config: BotHierarchyConfigV1,
   segments: string[],
@@ -1274,7 +1290,8 @@ function ensureFolderPath(
   let currentConfig = config;
   let parentId: string | null = null;
 
-  for (const segment of limitedSegments) {
+  for (let i = 0; i < limitedSegments.length; i += 1) {
+    const segment = limitedSegments[i];
     const existing = findChildFolderByName(currentConfig, parentId, segment);
     if (existing) {
       parentId = existing.id;
@@ -1283,7 +1300,12 @@ function ensureFolderPath(
     if (Object.keys(currentConfig.folders).length >= BOT_HIERARCHY_MAX_FOLDERS) {
       return { config: currentConfig, folderId: parentId, skippedForLimit: true };
     }
+    const deterministicId = deterministicPathFolderId(limitedSegments.slice(0, i + 1));
+    const canUseDeterministicId =
+      !(deterministicId in currentConfig.folders) &&
+      !(deterministicId in currentConfig.deletedFolderIds);
     const created = createBotFolder(currentConfig, {
+      ...(canUseDeterministicId ? { id: deterministicId } : {}),
       name: segment,
       parentId,
       now,
@@ -1325,7 +1347,7 @@ const KNOWN_ROLE_PREFIXES_ORDERED: Array<{
   path: string[];
 }> = [
   { regex: /^SECRETARY$/i, bareRegex: /^SECRETARY$/i, path: ['行政秘书'] },
-  { regex: /^HB\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^HB$/i, path: ['美术视觉'] },
+  { regex: /^HB\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^HB$/i, path: ['技术研发', '工程基建'] },
   { regex: /^AU\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^AU$/i, path: ['动画音频'] },
   { regex: /^BD\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^BD$/i, path: ['商业运营', '商务合作'] },
   { regex: /^PM\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^PM$/i, path: ['商业运营', '项目管理'] },
@@ -1335,9 +1357,9 @@ const KNOWN_ROLE_PREFIXES_ORDERED: Array<{
   { regex: /^FN\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^FN$/i, path: ['职能支持', '财务管理'] },
   { regex: /^LG\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^LG$/i, path: ['职能支持', '法务合规'] },
   { regex: /^M\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^M$/i, path: ['管理总控'] },
-  { regex: /^D\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^D$/i, path: ['技术研发'] },
-  { regex: /^P\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^P$/i, path: ['产品策划'] },
-  { regex: /^A\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^A$/i, path: ['动画音频'] },
+  { regex: /^D\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^D$/i, path: ['产品策划'] },
+  { regex: /^P\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^P$/i, path: ['技术研发', '程序开发'] },
+  { regex: /^A\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^A$/i, path: ['美术视觉'] },
   { regex: /^Q\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^Q$/i, path: ['测试质检'] },
   { regex: /^H\d+(?:_[A-Z0-9_]+)?$/i, bareRegex: /^(?:H|HR)$/i, path: ['职能支持', '人力资源'] },
 ];

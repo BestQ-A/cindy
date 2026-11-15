@@ -125,6 +125,12 @@ export type TeammateTreeEntry =
       open: () => void;
     };
 
+export interface PeerComputerSummary {
+  deviceId: string;
+  name: string;
+  online: boolean;
+}
+
 export interface TeammatesHierarchyTreeProps {
   entries: readonly TeammateTreeEntry[];
   groupByComputer: boolean;
@@ -133,6 +139,7 @@ export interface TeammatesHierarchyTreeProps {
   collapsedComputerIds: ReadonlySet<string>;
   localDeviceId: string | null;
   localDeviceName: string;
+  peerComputers?: readonly PeerComputerSummary[];
   editingFolderId: string | null;
   onChangeEditingFolderId: (folderId: string | null) => void;
   onToggleFolder: (folderId: string) => void;
@@ -159,6 +166,7 @@ interface ComputerSection {
 
 interface SubtreeSummary {
   statuses: TeammateStatus[];
+  totalCount: number;
   hasRunning: boolean;
   aggregatedStatus: TeammateStatus;
   dotTone: DotTone | null;
@@ -229,13 +237,16 @@ function summarizeSubtree(
 ): SubtreeSummary {
   const direct = membersByFolder.get(node.folder.id) ?? [];
   const statuses: TeammateStatus[] = direct.map((entry) => entry.status);
+  let totalCount = direct.length;
   for (const child of node.children) {
     const childSummary = summarizeSubtree(child, membersByFolder, out);
     statuses.push(...childSummary.statuses);
+    totalCount += childSummary.totalCount;
   }
   const aggregatedStatus = aggregateTeammateStatus(statuses);
   const summary: SubtreeSummary = {
     statuses,
+    totalCount,
     hasRunning: statuses.includes('running'),
     aggregatedStatus,
     dotTone: dotToneForStatus(aggregatedStatus),
@@ -323,6 +334,7 @@ export function TeammatesHierarchyTree({
   collapsedComputerIds,
   localDeviceId,
   localDeviceName,
+  peerComputers,
   editingFolderId,
   onChangeEditingFolderId,
   onToggleFolder,
@@ -828,8 +840,16 @@ export function TeammatesHierarchyTree({
                   size={13}
                   strokeWidth={2}
                   aria-hidden
-                  className="shrink-0 text-[var(--cmd-palette-item-meta)] opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100"
+                  className="shrink-0 text-[var(--cmd-palette-item-meta)]"
                 />
+                {(summary?.totalCount ?? 0) > 0 ? (
+                  <span
+                    data-folder-count={summary!.totalCount}
+                    className="shrink-0 text-11 tabular-nums text-[var(--cmd-palette-item-meta)]"
+                  >
+                    {summary!.totalCount}
+                  </span>
+                ) : null}
               </button>
             )}
 
@@ -975,7 +995,14 @@ export function TeammatesHierarchyTree({
           </div>
 
           <SectionCollapse collapsed={isCollapsed}>
-            <div className="flex flex-col gap-0.5">
+            <div className="relative flex flex-col gap-0.5">
+              {(children.length > 0 || directEntries.length > 0) ? (
+                <span
+                  aria-hidden="true"
+                  style={{ left: 15 + (depth - 1) * 14 }}
+                  className="pointer-events-none absolute top-0.5 bottom-1 w-px bg-[var(--border-default)] opacity-60"
+                />
+              ) : null}
               {children.map((child) => renderFolderNode(child, childSiblingIds))}
               {directEntries.map((entry) =>
                 renderEntryNode(entry, folder.id, directKeys, depth),
@@ -1085,7 +1112,7 @@ export function TeammatesHierarchyTree({
 
   const localKey = 'local';
   const hasAnyLocalOrGroup = entries.some((entry) => !entry.deviceId);
-  if (hasAnyLocalOrGroup || folderTree.length > 0) {
+  if (hasAnyLocalOrGroup || folderTree.length > 0 || (peerComputers && peerComputers.length > 0)) {
     ensureSection(localKey, localDeviceId, localDeviceName, true, true);
   }
 
@@ -1103,6 +1130,16 @@ export function TeammatesHierarchyTree({
     } else {
       const localSection = ensureSection(localKey, localDeviceId, localDeviceName, true, true);
       localSection.entries.push(entry);
+    }
+  }
+
+  if (peerComputers) {
+    for (const peer of peerComputers) {
+      if (!peer.deviceId || peer.deviceId === localDeviceId) continue;
+      const remoteKey = `device:${peer.deviceId}`;
+      if (!sectionByKey.has(remoteKey)) {
+        ensureSection(remoteKey, peer.deviceId, peer.name || peer.deviceId, peer.online, false);
+      }
     }
   }
 
@@ -1134,6 +1171,9 @@ export function TeammatesHierarchyTree({
                   <MonitorSmartphone size={13} strokeWidth={2} aria-hidden />
                 </span>
                 <span className="min-w-0 truncate text-xs font-medium">{section.name}</span>
+                <span className="shrink-0 text-11 tabular-nums text-[var(--cmd-palette-item-meta)]">
+                  {section.entries.length}
+                </span>
                 {isCollapsed ? (
                   <ChevronRight size={12} strokeWidth={2} className="shrink-0" aria-hidden />
                 ) : (
@@ -1157,7 +1197,13 @@ export function TeammatesHierarchyTree({
             </DeviceSectionHeader>
             <SectionCollapse collapsed={isCollapsed}>
               <div className={cn('flex flex-col gap-0.5 pl-2', (section.entries.length > 0 || section.isLocal) && 'pt-1')}>
-                {renderSectionContent(section.entries, section.isLocal)}
+                {section.entries.length === 0 && !section.isLocal ? (
+                  <p className="px-2.5 py-1 text-11 text-[var(--cmd-palette-item-meta)]">
+                    {t('bots.hierarchy.ungrouped')} (0)
+                  </p>
+                ) : (
+                  renderSectionContent(section.entries, section.isLocal)
+                )}
               </div>
             </SectionCollapse>
           </div>

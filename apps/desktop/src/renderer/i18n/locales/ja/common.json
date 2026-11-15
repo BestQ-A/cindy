@@ -12289,7 +12289,12 @@
       "localComputer": "このコンピューター",
       "selectGroupAll": "このグループをすべて選択",
       "deselectGroupAll": "このグループの選択を解除",
-      "searchMembersPlaceholder": "仲間を検索…"
+      "searchMembersPlaceholder": "仲間を検索…",
+      "folderSettingLabel": "フォルダ",
+      "quickByComputer": "PC別",
+      "quickCompact": "コンパクト",
+      "quickSmartOrganize": "自動整理",
+      "quickNewFolder": "新規フォルダ"
     }
   },
   "common": {

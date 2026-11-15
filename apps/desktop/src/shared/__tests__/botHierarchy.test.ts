@@ -318,22 +318,22 @@ describe('applyBotBatchOrganize & buildSmartBotHierarchy', () => {
       { botId: 'cindy', name: 'Cindy' },
       { botId: 'sec', name: '万界｜总协调（SECRETARY）' },
       { botId: 'm01', name: '万界｜制作人（M01）' },
-      { botId: 'd01', name: '万界｜核心研发（D01）' },
-      { botId: 'p01', name: '万界｜产品策划（P01）' },
+      { botId: 'd01', name: '万界｜主策划（D01）' },
+      { botId: 'p01', name: '万界｜主程（P01）' },
       { botId: 'p03', name: '万界｜章节玩法（P03_IMPL）' },
-      { botId: 'hb01', name: '万界｜主视觉（HB01）' },
-      { botId: 'a01', name: '万界｜动作美术（A01）' },
-      { botId: 'au01', name: '万界｜音频音效（AU01）' },
+      { botId: 'hb01', name: '万界｜工程效能（HB01）' },
+      { botId: 'a01', name: '万界｜主美（A01）' },
+      { botId: 'au01', name: '万界｜音频（AU01）' },
       { botId: 'q01', name: '万界｜QA 组长（Q01）' },
       { botId: 'q03', name: '万界｜盲测验收（Q03_BLIND）' },
       { botId: 'bd01', name: '万界｜商务发行（BD01）' },
-      { botId: 'pm01', name: '万界｜项目协调（PM01）' },
+      { botId: 'pm01', name: '万界｜增长 PM（PM01）' },
       { botId: 'mr01', name: '万界｜市场调研（MR01）' },
       { botId: 'da01', name: '万界｜数据分析（DA01）' },
-      { botId: 'op01', name: '万界｜产品运营（OP01）' },
-      { botId: 'fn01', name: '万界｜财务管理（FN01）' },
-      { botId: 'lg01', name: '万界｜法务合规（LG01）' },
-      { botId: 'h01', name: '万界｜人力资源（H01）' },
+      { botId: 'op01', name: '万界｜运营（OP01）' },
+      { botId: 'fn01', name: '万界｜财务（FN01）' },
+      { botId: 'lg01', name: '万界｜法务（LG01）' },
+      { botId: 'h01', name: '万界｜HR（H01）' },
     ];
 
     const result = buildSmartBotHierarchy(createEmptyBotHierarchyConfig(), wanjieRoster, {
@@ -348,16 +348,16 @@ describe('applyBotBatchOrganize & buildSmartBotHierarchy', () => {
     expect(pathOf('cindy')).toEqual(['核心助手']);
     expect(pathOf('sec')).toEqual(['万界', '行政秘书']);
     expect(pathOf('m01')).toEqual(['万界', '管理总控']);
-    expect(pathOf('d01')).toEqual(['万界', '技术研发']);
-    expect(pathOf('p01')).toEqual(['万界', '产品策划']);
-    expect(pathOf('p03')).toEqual(['万界', '产品策划']);
-    // Critical anti-collision checks: HB != H, PM != P, MR != M, DA != D
-    expect(pathOf('hb01')).toEqual(['万界', '美术视觉']);
+    expect(pathOf('d01')).toEqual(['万界', '产品策划']);
+    expect(pathOf('p01')).toEqual(['万界', '技术研发', '程序开发']);
+    expect(pathOf('p03')).toEqual(['万界', '技术研发', '程序开发']);
+    // Critical anti-collision checks: HB != H, PM != P, MR != M, DA != D, AU != A
+    expect(pathOf('hb01')).toEqual(['万界', '技术研发', '工程基建']);
     expect(pathOf('h01')).toEqual(['万界', '职能支持', '人力资源']);
     expect(pathOf('pm01')).toEqual(['万界', '商业运营', '项目管理']);
     expect(pathOf('mr01')).toEqual(['万界', '商业运营', '市场调研']);
     expect(pathOf('da01')).toEqual(['万界', '商业运营', '数据分析']);
-    expect(pathOf('a01')).toEqual(['万界', '动画音频']);
+    expect(pathOf('a01')).toEqual(['万界', '美术视觉']);
     expect(pathOf('au01')).toEqual(['万界', '动画音频']);
     expect(pathOf('q01')).toEqual(['万界', '测试质检']);
     expect(pathOf('q03')).toEqual(['万界', '测试质检']);
@@ -365,6 +365,36 @@ describe('applyBotBatchOrganize & buildSmartBotHierarchy', () => {
     expect(pathOf('op01')).toEqual(['万界', '商业运营', '运营推广']);
     expect(pathOf('fn01')).toEqual(['万界', '职能支持', '财务管理']);
     expect(pathOf('lg01')).toEqual(['万界', '职能支持', '法务合规']);
+  });
+
+  it('generates deterministic folder IDs across devices so concurrent smart seeds merge without duplicates', () => {
+    const roster: BotRosterOrganizeEntry[] = [
+      { botId: 'cindy', name: 'Cindy' },
+      { botId: 'sec', name: '万界｜总协调（SECRETARY）' },
+      { botId: 'p01', name: '万界｜主程（P01）' },
+      { botId: 'hb01', name: '万界｜工程效能（HB01）' },
+      { botId: 'a01', name: '万界｜主美（A01）' },
+    ];
+
+    const seedA = buildSmartBotHierarchy(createEmptyBotHierarchyConfig(), roster, {
+      now: 1000,
+      deviceId: 'dev-a',
+    });
+    const seedB = buildSmartBotHierarchy(createEmptyBotHierarchyConfig(), roster, {
+      now: 1050,
+      deviceId: 'dev-b',
+    });
+
+    expect(Object.keys(seedA.config.folders).sort()).toEqual(
+      Object.keys(seedB.config.folders).sort(),
+    );
+
+    const merged = mergeBotHierarchyConfigs(seedA.config, seedB.config);
+    expect(Object.keys(merged.folders).length).toBe(Object.keys(seedA.config.folders).length);
+    const rootNames = Object.values(merged.folders)
+      .filter((f) => f.parentId === null)
+      .map((f) => f.name);
+    expect(new Set(rootNames).size).toBe(rootNames.length);
   });
 
   it('handles ordinary bots by prefix/keywords, replaceExisting mode, and 250+ namespace saturation within caps', () => {

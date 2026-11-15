@@ -10,11 +10,17 @@ import {
   ArchiveRestore,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Copy,
   Eye,
   EyeOff,
+  FolderPlus,
+  MonitorSmartphone,
   Pin,
+  Rows3,
   Settings,
+  Sparkles,
   Trash2,
 } from 'lucide-react';
 import { matchPath, useLocation, useNavigate } from 'react-router-dom';
@@ -50,18 +56,32 @@ import { BotCreateMenu } from './BotCreateMenu';
 import { BotDeleteDialog } from './BotDeleteDialog';
 import { BotGroupSidebarRow } from './BotGroupSidebarRow';
 import { BotGroupSidebarAvatar } from './BotGroupAvatars';
+import { toast } from '@/lib/toast';
 import { BotMoveToFolderSubmenu } from './BotMoveToFolderSubmenu';
-import { TeammatesDisplayMenu } from './TeammatesDisplayMenu';
-import { TeammatesHierarchyTree, type TeammateTreeEntry } from './TeammatesHierarchyTree';
+import { executeSmartOrganize, TeammatesDisplayMenu } from './TeammatesDisplayMenu';
+import {
+  TeammatesHierarchyTree,
+  type PeerComputerSummary,
+  type TeammateTreeEntry,
+} from './TeammatesHierarchyTree';
 import {
   getBotHierarchySnapshot,
+  hasBotHierarchyHostApi,
+  isUntouchedEmptyBotHierarchy,
+  mutateBotHierarchy,
+  refreshBotHierarchy,
+  resolveUniqueBotFolderName,
   useBotHierarchy,
 } from './botHierarchyClientStore';
 import {
   type BotRosterOrganizeEntry,
   botHierarchyItemKey,
+  buildSmartBotHierarchy,
+  createBotFolder,
+  flattenFolderOptions,
   getFolderBreadcrumb,
   groupHierarchyItemKey,
+  resolveItemFolderId,
 } from '../../../shared/botHierarchy';
 import { refreshBotGroups, useBotGroupList } from './botGroupStore';
 import { BOT_GROUP_SETTINGS_PARAM, botGroupActivityAt } from './botGroupPresentation';
@@ -184,13 +204,38 @@ export function TeammatesSection() {
     setCollapsed(next);
     writeTeammatesSectionCollapsed(dataOwnerId, next);
   };
-  const { config: hierarchyConfig } = useBotHierarchy();
+  const { config: hierarchyConfig, loaded: hierarchyLoaded, ownerId: hierarchyOwnerId } = useBotHierarchy();
   const cloud = useCompanionCloud();
   const rosterRemoteBots = useRemoteBots();
   // One row per companion, on its main computer (offline rows for computers never listed here).
   const remoteBots = useMemo(() => cloudRemoteBots(cloud, rosterRemoteBots), [rosterRemoteBots, cloud]);
   const devices = useDeviceLinkDeviceList();
   const self = devices?.find((device) => device.isSelf);
+  const peerComputers = useMemo<PeerComputerSummary[]>(() => {
+    if (!devices) return [];
+    const seen = new Set<string>();
+    const list: PeerComputerSummary[] = [];
+    for (const dev of devices) {
+      if (!dev.deviceId || dev.isSelf) continue;
+      if (dev.platform === 'ios' || dev.platform === 'android') continue;
+      if (seen.has(dev.deviceId)) continue;
+      seen.add(dev.deviceId);
+      list.push({
+        deviceId: dev.deviceId,
+        name: dev.name?.trim() || dev.deviceId,
+        online: dev.online === true,
+      });
+    }
+    return list;
+  }, [devices]);
+  const autoSeededScopeRef = useRef<string | null>(null);
+  const autoSeedMountedRef = useRef(true);
+  useEffect(() => {
+    autoSeedMountedRef.current = true;
+    return () => {
+      autoSeedMountedRef.current = false;
+    };
+  }, []);
   const rosterDevices = [
     ...(self ? [self] : []),
     ...remoteBots.map((bot) => ({ deviceId: bot.deviceId, name: bot.deviceName })),
@@ -514,9 +559,39 @@ export function TeammatesSection() {
       for (const bot of remoteBots) {
         computerKeys.add(`device:${bot.deviceId}`);
       }
+      for (const peer of peerComputers) {
+        computerKeys.add(`device:${peer.deviceId}`);
+      }
       setCollapsedComputers(computerKeys);
       writeTeammatesCollapsedComputers(dataOwnerId, computerKeys);
     }
+  };
+
+  const handleQuickCreateRootFolder = async () => {
+    let createdFolderId = '';
+    const baseName = t('bots.hierarchy.defaultFolderName');
+    await mutateBotHierarchy((curr) => {
+      const name = resolveUniqueBotFolderName(curr, baseName, null);
+      const result = createBotFolder(curr, { name, parentId: null });
+      createdFolderId = result.folder.id;
+      return result.config;
+    });
+    if (createdFolderId) {
+      handleCreatedFolder(createdFolderId);
+    }
+  };
+
+  const handleQuickSmartOrganize = async () => {
+    const { organizedCount, folderIds } = await executeSmartOrganize(
+      organizeEntries,
+      self?.deviceId ?? undefined,
+    );
+    if (organizedCount === 0) {
+      toast.info(t('bots.hierarchy.smartOrganizeEmpty'));
+      return;
+    }
+    handleSmartOrganized(folderIds);
+    toast.success(t('bots.hierarchy.smartOrganizeDone'));
   };
 
   const handleCreatedFolder = (folderId: string) => {
@@ -1037,12 +1112,137 @@ export function TeammatesSection() {
 
   const hasFolders = Object.keys(hierarchyConfig.folders).length > 0;
   const useHierarchyView = hasFolders || groupByComputer || compactDensity;
+  const showGroupingBar =
+    hasFolders ||
+    groupByComputer ||
+    compactDensity ||
+    visibleChats.length > CHAT_PREVIEW_LIMIT ||
+    peerComputers.length > 0;
+  const keepHeaderActionsVisible =
+    hasFolders || groupByComputer || compactDensity || visibleChats.length > CHAT_PREVIEW_LIMIT;
+
+  const latestAutoSeedInputsRef = useRef({
+    organizeEntries,
+    treeEntries,
+    deviceId: self?.deviceId ?? undefined,
+    dataOwnerId,
+  });
+  latestAutoSeedInputsRef.current = {
+    organizeEntries,
+    treeEntries,
+    deviceId: self?.deviceId ?? undefined,
+    dataOwnerId,
+  };
+
+  const hasHostHierarchyApi = hasBotHierarchyHostApi();
+  const isHierarchyEmpty = isUntouchedEmptyBotHierarchy(hierarchyConfig);
+  const canAutoSeed =
+    hasHostHierarchyApi &&
+    hierarchyLoaded &&
+    isHierarchyEmpty &&
+    organizeEntries.length >= 6;
+
+  useEffect(() => {
+    if (!canAutoSeed) return;
+    const scopeKey = hierarchyOwnerId ?? '__local__';
+    if (autoSeededScopeRef.current === scopeKey) return;
+
+    const { organizeEntries: snapshotEntries } = latestAutoSeedInputsRef.current;
+    const preview = buildSmartBotHierarchy(hierarchyConfig, snapshotEntries);
+    if (preview.summary.assignedItemCount < 4 || preview.summary.createdFolderIds.length < 2) {
+      return;
+    }
+
+    autoSeededScopeRef.current = scopeKey;
+    let cancelled = false;
+    let didCommit = false;
+
+    void (async () => {
+      try {
+        const synced = await refreshBotHierarchy(true);
+        if (cancelled || !autoSeedMountedRef.current || !isUntouchedEmptyBotHierarchy(synced.config)) return;
+
+        const current = latestAutoSeedInputsRef.current;
+        didCommit = true;
+        const committed = await mutateBotHierarchy((curr) =>
+          isUntouchedEmptyBotHierarchy(curr)
+            ? buildSmartBotHierarchy(curr, current.organizeEntries, {
+                deviceId: current.deviceId,
+              }).config
+            : curr,
+        );
+
+        if (
+          autoSeedMountedRef.current &&
+          latestAutoSeedInputsRef.current.dataOwnerId === current.dataOwnerId &&
+          current.organizeEntries.length > 12 &&
+          readTeammatesCollapsedFolders(current.dataOwnerId).size === 0
+        ) {
+          const keepExpandedIds = new Set<string>();
+          for (const item of current.treeEntries) {
+            if (
+              item.selected ||
+              item.typing ||
+              item.unread > 0 ||
+              item.status === 'awaiting' ||
+              item.status === 'running'
+            ) {
+              const fid = resolveItemFolderId(committed, item.itemKey);
+              if (fid) {
+                for (const ancestor of getFolderBreadcrumb(committed, fid)) {
+                  keepExpandedIds.add(ancestor.id);
+                }
+              }
+            }
+          }
+          const initialCollapsed = new Set(
+            flattenFolderOptions(committed)
+              .filter((opt) => opt.depth >= 2 && !keepExpandedIds.has(opt.id))
+              .map((opt) => opt.id),
+          );
+          if (initialCollapsed.size > 0) {
+            setCollapsedFolders(initialCollapsed);
+            writeTeammatesCollapsedFolders(current.dataOwnerId, initialCollapsed);
+          }
+        }
+      } catch {
+        // Retry cleanly on next render if initial host sync failed before committing.
+      } finally {
+        if (cancelled && !didCommit && autoSeededScopeRef.current === scopeKey) {
+          autoSeededScopeRef.current = null;
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (!didCommit && autoSeededScopeRef.current === scopeKey) {
+        autoSeededScopeRef.current = null;
+      }
+    };
+  }, [canAutoSeed, hierarchyOwnerId, hierarchyConfig]);
+
+  const allFolderIds = Object.keys(hierarchyConfig.folders);
+  const allComputerKeys = groupByComputer
+    ? Array.from(
+        new Set([
+          'local',
+          ...remoteBots.map((bot) => `device:${bot.deviceId}`),
+          ...peerComputers.map((peer) => `device:${peer.deviceId}`),
+        ]),
+      )
+    : [];
+  const canToggleFold = allFolderIds.length > 0 || groupByComputer;
+  const allGroupsCollapsed =
+    canToggleFold &&
+    allFolderIds.every((id) => collapsedFolders.has(id)) &&
+    allComputerKeys.every((key) => collapsedComputers.has(key));
 
   return (
     <div ref={sidebarRef} className="flex w-full flex-col gap-0.5" data-sidebar-section="teammates">
-      {/* 段头与置顶 / 全部任务段头同款:高 24,左 24 / 右 12;动作悬停浮现。 */}
+      {/* 段头与置顶 / 全部任务段头同款:高 24,左 24 / 右 12;动作悬停浮现,大数据量或启用分组时常驻。 */}
       <div className="group/sidebar-header flex h-6 items-center justify-between pr-3 pl-6">
-        <div className="flex min-w-0 items-center gap-1">
+        <div className="flex min-w-0 items-center gap-1.5">
           <button
             type="button"
             onClick={toggleCollapsed}
@@ -1051,6 +1251,14 @@ export function TeammatesSection() {
           >
             {t('bots.title')}
           </button>
+          {visibleChats.length > 0 ? (
+            <span
+              data-testid="teammates-total-count"
+              className="text-11 font-normal tabular-nums text-[var(--cmd-palette-item-meta)]"
+            >
+              {visibleChats.length}
+            </span>
+          ) : null}
           <div className={HEADER_HOVER_ACTION_CLASS}>
             <Tip text={toggleLabel} side="bottom">
               <button type="button" onClick={toggleCollapsed} aria-label={toggleLabel} aria-expanded={!collapsed} className={HEADER_ICON_BUTTON_CLASS}>
@@ -1059,7 +1267,12 @@ export function TeammatesSection() {
             </Tip>
           </div>
         </div>
-        <div className={cn('flex items-center gap-0.5', HEADER_HOVER_ACTION_CLASS)}>
+        <div
+          className={cn(
+            'flex items-center gap-0.5',
+            !keepHeaderActionsVisible && HEADER_HOVER_ACTION_CLASS,
+          )}
+        >
           {roster.showHiddenSection && !collapsed ? (
             <span className="flex">
               <button
@@ -1175,6 +1388,94 @@ export function TeammatesSection() {
       <SectionCollapse collapsed={collapsed}>
       <div className="flex flex-col pt-1 pr-0 pl-3">
 
+      {showGroupingBar && visibleChats.length > 0 ? (
+        <div
+          data-testid="teammates-grouping-bar"
+          className="mb-1 flex flex-wrap items-center gap-1 pr-2 pl-2.5"
+        >
+          <button
+            type="button"
+            aria-pressed={groupByComputer}
+            onClick={() => handleGroupByComputerChange(!groupByComputer)}
+            className={cn(
+              'inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-11 font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
+              groupByComputer
+                ? SIDEBAR_LIST_ROW_ACTIVE_CLASS
+                : 'text-[var(--sidebar-list-muted)] hover:bg-sidebar-item-hover hover:text-[var(--sidebar-nav-text)]',
+            )}
+          >
+            <MonitorSmartphone size={11} strokeWidth={2} aria-hidden />
+            <span>{t('bots.hierarchy.quickByComputer')}</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={compactDensity}
+            onClick={() => handleCompactDensityChange(!compactDensity)}
+            className={cn(
+              'inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-11 font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
+              compactDensity
+                ? SIDEBAR_LIST_ROW_ACTIVE_CLASS
+                : 'text-[var(--sidebar-list-muted)] hover:bg-sidebar-item-hover hover:text-[var(--sidebar-nav-text)]',
+            )}
+          >
+            <Rows3 size={11} strokeWidth={2} aria-hidden />
+            <span>{t('bots.hierarchy.quickCompact')}</span>
+          </button>
+          {!hasFolders ? (
+            <button
+              type="button"
+              onClick={() => void handleQuickSmartOrganize()}
+              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-11 font-medium text-[var(--sidebar-list-muted)] transition-colors outline-none hover:bg-sidebar-item-hover hover:text-[var(--sidebar-nav-text)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            >
+              <Sparkles size={11} strokeWidth={2} className="text-[var(--status-bar-accent)]" aria-hidden />
+              <span>{t('bots.hierarchy.quickSmartOrganize')}</span>
+            </button>
+          ) : (
+            <Tip text={t('bots.hierarchy.smartOrganize')} side="bottom">
+              <button
+                type="button"
+                aria-label={t('bots.hierarchy.quickSmartOrganize')}
+                onClick={() => void handleQuickSmartOrganize()}
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--sidebar-list-muted)] transition-colors outline-none hover:bg-sidebar-item-hover hover:text-[var(--sidebar-nav-text)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+              >
+                <Sparkles size={12} strokeWidth={2} className="text-[var(--status-bar-accent)]" aria-hidden />
+              </button>
+            </Tip>
+          )}
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+            <Tip text={t('bots.hierarchy.quickNewFolder')} side="bottom">
+              <button
+                type="button"
+                aria-label={t('bots.hierarchy.quickNewFolder')}
+                onClick={() => void handleQuickCreateRootFolder()}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--sidebar-list-muted)] transition-colors outline-none hover:bg-sidebar-item-hover hover:text-[var(--sidebar-nav-text)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+              >
+                <FolderPlus size={12} strokeWidth={2} aria-hidden />
+              </button>
+            </Tip>
+            {canToggleFold ? (
+              <Tip
+                text={t(allGroupsCollapsed ? 'bots.hierarchy.expandAll' : 'bots.hierarchy.collapseAll')}
+                side="bottom"
+              >
+                <button
+                  type="button"
+                  aria-label={t(allGroupsCollapsed ? 'bots.hierarchy.expandAll' : 'bots.hierarchy.collapseAll')}
+                  onClick={allGroupsCollapsed ? handleExpandAll : handleCollapseAll}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--sidebar-list-muted)] transition-colors outline-none hover:bg-sidebar-item-hover hover:text-[var(--sidebar-nav-text)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+                >
+                  {allGroupsCollapsed ? (
+                    <ChevronsUpDown size={12} strokeWidth={2} aria-hidden />
+                  ) : (
+                    <ChevronsDownUp size={12} strokeWidth={2} aria-hidden />
+                  )}
+                </button>
+              </Tip>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {archiveError && <p role="alert" className="mb-2 px-2.5 text-12 text-[var(--error-fg)]">{archiveError}</p>}
 
       <div>
@@ -1194,6 +1495,7 @@ export function TeammatesSection() {
                   collapsedComputerIds={collapsedComputers}
                   localDeviceId={self?.deviceId ?? null}
                   localDeviceName={self?.name ?? t('bots.hierarchy.localComputer')}
+                  peerComputers={peerComputers}
                   editingFolderId={editingFolderId}
                   onChangeEditingFolderId={setEditingFolderId}
                   onToggleFolder={handleToggleFolder}

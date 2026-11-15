@@ -12289,7 +12289,12 @@
       "localComputer": "本机",
       "selectGroupAll": "全选本组",
       "deselectGroupAll": "取消全选本组",
-      "searchMembersPlaceholder": "搜索伙伴…"
+      "searchMembersPlaceholder": "搜索伙伴…",
+      "folderSettingLabel": "所属分组",
+      "quickByComputer": "按电脑",
+      "quickCompact": "紧凑",
+      "quickSmartOrganize": "智能分组",
+      "quickNewFolder": "新建分组"
     }
   },
   "common": {

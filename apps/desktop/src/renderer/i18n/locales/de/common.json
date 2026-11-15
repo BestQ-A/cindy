@@ -12335,7 +12335,12 @@
       "localComputer": "Dieser Computer",
       "selectGroupAll": "Alle in dieser Gruppe auswählen",
       "deselectGroupAll": "Auswahl für diese Gruppe aufheben",
-      "searchMembersPlaceholder": "Freunde suchen…"
+      "searchMembersPlaceholder": "Freunde suchen…",
+      "folderSettingLabel": "Ordner",
+      "quickByComputer": "Computer",
+      "quickCompact": "Kompakt",
+      "quickSmartOrganize": "Auto-Sort.",
+      "quickNewFolder": "Neuer Ordner"
     }
   },
   "common": {

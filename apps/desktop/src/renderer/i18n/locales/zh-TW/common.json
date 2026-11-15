@@ -12289,7 +12289,12 @@
       "localComputer": "本機",
       "selectGroupAll": "全選本組",
       "deselectGroupAll": "取消全選本組",
-      "searchMembersPlaceholder": "搜尋夥伴…"
+      "searchMembersPlaceholder": "搜尋夥伴…",
+      "folderSettingLabel": "所屬分組",
+      "quickByComputer": "按電腦",
+      "quickCompact": "緊湊",
+      "quickSmartOrganize": "智慧分組",
+      "quickNewFolder": "新增分組"
     }
   },
   "common": {

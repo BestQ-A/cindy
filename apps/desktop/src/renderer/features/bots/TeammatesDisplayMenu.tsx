@@ -20,6 +20,7 @@ import { Tip } from '@/components/ui/tooltip';
 import { MENU_ITEM_CLASS } from '@/features/cc-agent/sidebar/menuStyles';
 import { toast } from '@/lib/toast';
 import {
+  type BotHierarchyConfigV1,
   type BotRosterOrganizeEntry,
   buildSmartBotHierarchy,
   createBotFolder,
@@ -31,7 +32,55 @@ import {
 } from './botHierarchyClientStore';
 
 const TRIGGER_BUTTON_CLASS =
-  'flex h-5 w-5 shrink-0 items-center justify-center rounded-lg text-[var(--sidebar-list-muted)] transition-colors hover:text-[var(--sidebar-nav-text)]';
+  'relative flex h-5 w-5 shrink-0 items-center justify-center rounded-lg text-[var(--sidebar-list-muted)] transition-colors hover:text-[var(--sidebar-nav-text)]';
+
+export interface SmartOrganizeOutcome {
+  organizedCount: number;
+  folderIds: string[];
+  config: BotHierarchyConfigV1;
+}
+
+/**
+ * Runs role/prefix/keyword smart organization over the given roster entries.
+ * If all eligible entries are already grouped, retries with overwrite so re-running
+ * applies updated taxonomy rules when assignments would change.
+ */
+export async function executeSmartOrganize(
+  organizeEntries: BotRosterOrganizeEntry[],
+  deviceId?: string,
+): Promise<SmartOrganizeOutcome> {
+  let organizedCount = 0;
+  let folderIds: string[] = [];
+  const nextConfig = await mutateBotHierarchy((curr) => {
+    const initial = buildSmartBotHierarchy(curr, organizeEntries, { deviceId });
+    let resolved = initial;
+    if (
+      initial.summary.assignedItemCount === 0 &&
+      initial.summary.createdFolderIds.length === 0
+    ) {
+      const refreshed = buildSmartBotHierarchy(curr, organizeEntries, {
+        deviceId,
+        overwriteExistingAssignments: true,
+      });
+      const assignmentsChanged =
+        refreshed.summary.createdFolderIds.length > 0 ||
+        Object.keys(refreshed.config.assignments).length !== Object.keys(curr.assignments).length ||
+        Object.entries(refreshed.config.assignments).some(
+          ([key, value]) => curr.assignments[key]?.folderId !== value.folderId,
+        );
+      if (assignmentsChanged) {
+        resolved = refreshed;
+      }
+    }
+    organizedCount = resolved.summary.assignedItemCount + resolved.summary.createdFolderIds.length;
+    folderIds = Array.from(
+      new Set([...resolved.summary.createdFolderIds, ...resolved.summary.updatedFolderIds]),
+    );
+    return resolved.config;
+  });
+
+  return { organizedCount, folderIds, config: nextConfig };
+}
 
 export interface TeammatesDisplayMenuProps {
   /** Roster entries passed to smart organize when triggered from the menu. */
@@ -84,16 +133,7 @@ export function TeammatesDisplayMenu({
   };
 
   const handleSmartOrganize = async () => {
-    let organizedCount = 0;
-    let folderIds: string[] = [];
-    await mutateBotHierarchy((curr) => {
-      const result = buildSmartBotHierarchy(curr, organizeEntries);
-      organizedCount = result.summary.assignedItemCount + result.summary.createdFolderIds.length;
-      folderIds = Array.from(
-        new Set([...result.summary.createdFolderIds, ...result.summary.updatedFolderIds]),
-      );
-      return result.config;
-    });
+    const { organizedCount, folderIds } = await executeSmartOrganize(organizeEntries);
 
     if (organizedCount === 0) {
       toast.info(t('bots.hierarchy.smartOrganizeEmpty'));
@@ -113,6 +153,12 @@ export function TeammatesDisplayMenu({
             aria-label={t('bots.hierarchy.menuTrigger')}
           >
             <SlidersHorizontal size={13} strokeWidth={2} />
+            {(groupByComputer || compactDensity) ? (
+              <span
+                aria-hidden="true"
+                className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-[var(--status-bar-accent)]"
+              />
+            ) : null}
           </button>
         </Tip>
       </DropdownMenuTrigger>

@@ -50,6 +50,7 @@ import {
 import { useCompanionCloud } from './companionCloudStore';
 import { cloudCompanionAt, withoutShadowedBots } from './companionCloudPresentation';
 import { BotHomeComputerSetting } from './BotHomeComputerSetting';
+import { BotFolderSetting } from './BotFolderSetting';
 import { CindyMergeSetting } from './CindyMergeSetting';
 import { BotLifecycleSettings } from './BotLifecycleSettings';
 import { BotInvitationWelcome } from './BotInvitationWelcome';
@@ -526,16 +527,21 @@ export function BotSettings({
             {!isRemote ? (
               <>
                 <BotHomeComputerSetting bot={bot} />
+                <BotFolderSetting bot={{ id: bot.id, name: bot.name }} />
                 <CindyMergeSetting bot={bot} />
               </>
             ) : cloudCompanionAt(cloud, target.deviceId!, bot.id) ? (
               // The main computer can be changed from any computer (it is asked to hand the companion over).
               <>
                 <BotHomeComputerSetting bot={{ id: bot.id, name: bot.name }} />
+                <BotFolderSetting bot={{ id: bot.id, name: bot.name }} remoteDeviceId={target.deviceId} isCloudCompanion />
                 <CindyMergeSetting bot={{ id: bot.id, name: bot.name }} />
               </>
             ) : (
-              <p className="mt-4 truncate text-12 text-[var(--text-tertiary)]">{target.deviceName}</p>
+              <>
+                <BotFolderSetting bot={{ id: bot.id, name: bot.name }} remoteDeviceId={target.deviceId} isCloudCompanion={false} />
+                <p className="mt-4 truncate text-12 text-[var(--text-tertiary)]">{target.deviceName}</p>
+              </>
             )}
             <div className="mt-6">
               <BotLifecycleSettings

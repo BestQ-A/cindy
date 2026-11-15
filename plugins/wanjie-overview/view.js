@@ -306,6 +306,16 @@ function buildVisibleFolderTree(companions, baseLookup) {
     if (pruned) prunedRoots.push(pruned);
   }
   sortUngrouped(ungrouped);
+  if (
+    elements.scope?.value === 'wanjie' &&
+    prunedRoots.length === 1 &&
+    prunedRoots[0].name === '万界' &&
+    prunedRoots[0].companions.length === 0 &&
+    prunedRoots[0].children.length > 0 &&
+    ungrouped.length === 0
+  ) {
+    return { roots: prunedRoots[0].children, ungrouped };
+  }
   return { roots: prunedRoots, ungrouped };
 }
 

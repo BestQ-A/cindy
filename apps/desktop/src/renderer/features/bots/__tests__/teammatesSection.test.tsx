@@ -104,7 +104,10 @@ import {
   resetBotHierarchyStoreForTests,
 } from '../botHierarchyClientStore';
 import { markBotRead, resetBotReadStateForTests } from '../botReadState';
-import { readTeammatesSectionCollapsed } from '../teammatesSectionPrefs';
+import {
+  readTeammatesCollapsedFolders,
+  readTeammatesSectionCollapsed,
+} from '../teammatesSectionPrefs';
 import { setDataOwnerGeneration } from '@/contexts/dataOwnerGeneration';
 import { toast } from '@/lib/toast';
 import {
@@ -1540,6 +1543,85 @@ describe('TeammatesSection hierarchy, display menu, and tree interactions', () =
 
     await waitFor(() => {
       expect(resolveItemFolderId(getBotHierarchySnapshot().config, 'bot:bot-2')).toBeNull();
+    });
+  });
+
+  it('auto-seeds multi-level hierarchy for untouched large structured rosters and surfaces quick grouping controls + empty peer computers', async () => {
+    let persistedConfig = createEmptyBotHierarchyConfig();
+    const empty = createEmptyBotHierarchyConfig();
+    const getMock = vi.fn(async () => ({ ownerId: 'fixture-owner', config: persistedConfig }));
+    const writeMock = vi.fn(async (body: { config: typeof empty }) => {
+      persistedConfig = body.config;
+      return { ownerId: 'fixture-owner', config: persistedConfig };
+    });
+
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      writable: true,
+      value: {
+        ...(window as unknown as { electronAPI: Record<string, unknown> }).electronAPI,
+        localDb: {
+          ...((window as unknown as { electronAPI: { localDb: Record<string, unknown> } }).electronAPI
+            .localDb),
+          bots: {
+            hierarchy: {
+              get: getMock,
+              write: writeMock,
+              sync: vi.fn(async () => ({ ownerId: 'fixture-owner', config: persistedConfig })),
+            },
+          },
+        },
+      },
+    });
+
+    mocks.devices = [
+      { deviceId: 'self-1', name: 'Workstation', isSelf: true },
+      { deviceId: 'peer-2', name: 'optix-display', isSelf: false },
+    ];
+    mocks.profiles = [
+      bot({ id: 'cindy-default', name: 'Cindy' }),
+      bot({ id: 'sec', name: '万界｜总协调（SECRETARY）' }),
+      bot({ id: 'm01', name: '万界｜制作人（M01）' }),
+      bot({ id: 'd01', name: '万界｜主策划（D01）' }),
+      bot({ id: 'd02', name: '万界｜文案（D02）' }),
+      bot({ id: 'p01', name: '万界｜主程（P01）' }),
+      bot({ id: 'p02', name: '万界｜渲染（P02）' }),
+      bot({ id: 'hb01', name: '万界｜工程效能（HB01）' }),
+      bot({ id: 'a01', name: '万界｜主美（A01）' }),
+      bot({ id: 'a02', name: '万界｜角色（A02）' }),
+      bot({ id: 'au01', name: '万界｜音频（AU01）' }),
+      bot({ id: 'q01', name: '万界｜QA（Q01）' }),
+      bot({ id: 'bd01', name: '万界｜发行（BD01）' }),
+      bot({ id: 'fn01', name: '万界｜财务（FN01）' }),
+    ];
+
+    const view = await renderSidebar();
+
+    await waitFor(() => {
+      expect(writeMock).toHaveBeenCalled();
+      expect(screen.getByText('核心助手')).toBeTruthy();
+      expect(screen.getByText('万界')).toBeTruthy();
+      expect(screen.getByText('技术研发')).toBeTruthy();
+      expect(screen.getByText('产品策划')).toBeTruthy();
+      expect(screen.getByText('美术视觉')).toBeTruthy();
+    });
+
+    // Total companion count badge & folder count badges are visible.
+    expect(screen.getByTestId('teammates-total-count').textContent).toBe('14');
+    expect(view.container.querySelector('[data-folder-count="3"]')).not.toBeNull();
+
+    // Depth >= 2 subfolders start collapsed for >12 rosters so long lists don't overflow the sidebar.
+    expect(readTeammatesCollapsedFolders('fixture-owner').size).toBeGreaterThan(0);
+
+    // Quick Grouping Bar toggles By Computer -> shows even an empty linked peer computer section.
+    const groupingBar = screen.getByTestId('teammates-grouping-bar');
+    expect(groupingBar).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'bots.hierarchy.quickByComputer' }));
+
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-computer-section="local"]')).not.toBeNull();
+      expect(view.container.querySelector('[data-computer-section="device:peer-2"]')).not.toBeNull();
+      expect(screen.getByText('optix-display')).toBeTruthy();
     });
   });
 });

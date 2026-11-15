@@ -12289,7 +12289,12 @@
       "localComputer": "이 컴퓨터",
       "selectGroupAll": "이 그룹 모두 선택",
       "deselectGroupAll": "이 그룹 선택 해제",
-      "searchMembersPlaceholder": "동반자 검색…"
+      "searchMembersPlaceholder": "동반자 검색…",
+      "folderSettingLabel": "폴더",
+      "quickByComputer": "컴퓨터별",
+      "quickCompact": "간단히",
+      "quickSmartOrganize": "자동 정리",
+      "quickNewFolder": "새 폴더"
     }
   },
   "common": {

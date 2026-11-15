@@ -156,6 +156,8 @@ vi.mock('../voice/CompanionVoiceSettings', () => ({
 }));
 
 import { BotsHomeView, BotSettings } from '../BotsHomeView';
+import { mutateBotHierarchy, resetBotHierarchyStoreForTests } from '../botHierarchyClientStore';
+import { assignItemsToFolder, botHierarchyItemKey, createBotFolder, createEmptyBotHierarchyConfig } from '../../../../shared/botHierarchy';
 import { readBotSettingsPatch } from '../../../../main/localDb/ipc/botRemoteSettingsOps';
 import { normalizeBotProfileModelChain } from '../../../../shared/botModelChain';
 import { createIpcError } from '../../../../shared/ipc-errors';
@@ -227,6 +229,7 @@ function renderSettings(overrides: Partial<BotProfile> = {}, initialSearch = 'se
 }
 
 beforeEach(() => {
+  resetBotHierarchyStoreForTests();
   mocks.navigate.mockReset();
   mocks.retryBotInvitation.mockClear();
   mocks.onboarding = false;
@@ -1318,4 +1321,23 @@ it('opens voice settings from the companion settings list and supports the dedic
   view.unmount();
   render(<BotSettings bot={companion} initialPage="voice" onBack={vi.fn()} onOpenSession={vi.fn()} />);
   expect(screen.getByTestId('companion-voice-settings')).toBeTruthy();
+});
+
+it('displays and updates folder group membership in companion settings', async () => {
+  renderSettings();
+  const row = screen.getByTestId('bot-folder-setting-row');
+  expect(row.textContent).toContain('bots.hierarchy.folderSettingLabel');
+  expect(row.textContent).toContain('bots.hierarchy.ungrouped');
+
+  await act(async () => {
+    await mutateBotHierarchy(() => {
+      const root = createBotFolder(createEmptyBotHierarchyConfig(), { name: '万界' });
+      const child = createBotFolder(root.config, { name: '技术研发', parentId: root.folder.id });
+      return assignItemsToFolder(child.config, [botHierarchyItemKey('bot-1')], child.folder.id);
+    });
+  });
+
+  await waitFor(() => {
+    expect(screen.getByTestId('bot-folder-setting-row').textContent).toContain('万界 / 技术研发');
+  });
 });

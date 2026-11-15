@@ -12435,7 +12435,12 @@
       "localComputer": "Este computador",
       "selectGroupAll": "Selecionar todo o grupo",
       "deselectGroupAll": "Desmarcar todo o grupo",
-      "searchMembersPlaceholder": "Buscar amigos…"
+      "searchMembersPlaceholder": "Buscar amigos…",
+      "folderSettingLabel": "Pasta",
+      "quickByComputer": "Por PC",
+      "quickCompact": "Compacto",
+      "quickSmartOrganize": "Autoagrupar",
+      "quickNewFolder": "Nova pasta"
     }
   },
   "common": {

@@ -12289,7 +12289,12 @@
       "localComputer": "此机",
       "selectGroupAll": "全择此群",
       "deselectGroupAll": "罢择此群",
-      "searchMembersPlaceholder": "寻同伴…"
+      "searchMembersPlaceholder": "寻同伴…",
+      "folderSettingLabel": "所属卷匣",
+      "quickByComputer": "依机",
+      "quickCompact": "简览",
+      "quickSmartOrganize": "智能归类",
+      "quickNewFolder": "新立卷匣"
     }
   },
   "common": {

@@ -205,6 +205,21 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
+/** Synchronously reports whether the host preload IPC bindings for bot hierarchy are mounted. */
+export function hasBotHierarchyHostApi(): boolean {
+  return hierarchyApi() !== null;
+}
+
+/** Returns true when a hierarchy config has never been edited, populated, or tombstoned. */
+export function isUntouchedEmptyBotHierarchy(config: BotHierarchyConfigV1): boolean {
+  return (
+    config.updatedAt === 0 &&
+    Object.keys(config.folders).length === 0 &&
+    Object.keys(config.assignments).length === 0 &&
+    Object.keys(config.deletedFolderIds).length === 0
+  );
+}
+
 /** Synchronously returns the current owner's cached hierarchy snapshot. */
 export function getBotHierarchySnapshot(): BotHierarchyClientSnapshot {
   ensureOwner();
