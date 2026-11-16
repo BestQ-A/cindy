@@ -130,6 +130,12 @@ import { runBotProjectsTool } from '../maker-ipc/botLinkedProjects.js';
 import { createTaskDigestReader } from './taskDigest.js';
 import { createDesktopTaskDigestDeps } from './taskDigestHost.js';
 import { createTaskToolCallAuthorizer } from '../maker-ipc/taskToolCallAuthorizer.js';
+import { computeGoalNextActions, type GoalRecord } from '../../shared/goalBoard.js';
+import {
+  readGoalBoard,
+  transitionGoalWorkItem,
+  upsertGoalRecord,
+} from '../maker-ipc/goalBoardStore.js';
 import { createDesktopTaskActionAuthorizer } from '../maker-ipc/taskActionHost.js';
 import { authorizeGroupTool, reportGroupTaskCreated } from '../maker-ipc/botGroupToolAuthorization.js';
 import { createSharedTaskTools } from './sharedTaskTools.js';
@@ -189,6 +195,28 @@ import {
   type BotHierarchyFolderTreeNode,
   type BotRosterOrganizeEntry,
 } from '../../shared/botHierarchy.js';
+
+async function resolveGoalBoardQueueCounts(
+  goals: GoalRecord[],
+): Promise<Record<string, number>> {
+  const sessionIds = new Set<string>();
+  for (const goal of goals) {
+    if (goal.pmSessionId) sessionIds.add(goal.pmSessionId);
+    for (const item of goal.items) {
+      if (item.ownerSessionId) sessionIds.add(item.ownerSessionId);
+      if (item.reviewerSessionId) sessionIds.add(item.reviewerSessionId);
+    }
+  }
+  if (sessionIds.size === 0) return {};
+  try {
+    const svc = tryGetOrcaCollabService();
+    if (!svc) return {};
+    const res = await svc.listSessionQueuedCounts(Array.from(sessionIds));
+    return res.ok ? res.counts : {};
+  } catch {
+    return {};
+  }
+}
 
 export interface DesktopMcpProvidersDeps {
   askUserQuestionAsync?: XdtHelperMcpDeps['askUserQuestionAsync'];
@@ -2182,6 +2210,51 @@ export function createDesktopMcpProviders(deps: DesktopMcpProvidersDeps): LiziMc
       askUserQuestionAsync: deps.askUserQuestionAsync,
       manageUserQuestions: deps.manageUserQuestions,
       sessionImport: sessionImportCallbacks,
+      goalBoard: {
+        get: async ({ goalId }) => {
+          const board = readGoalBoard();
+          const selected = goalId
+            ? board.goals.filter((g) => g.id === goalId)
+            : board.goals;
+          const queueCounts = await resolveGoalBoardQueueCounts(selected);
+          return {
+            ok: true as const,
+            goals: selected.map((goal) => ({
+              goal,
+              nextActions: computeGoalNextActions(goal, { sessionQueueCounts: queueCounts }),
+            })),
+          };
+        },
+        upsert: async (input) => {
+          const saved = await upsertGoalRecord(input);
+          const queueCounts = await resolveGoalBoardQueueCounts([saved.goal]);
+          return {
+            ok: true as const,
+            goal: saved.goal,
+            nextActions: computeGoalNextActions(saved.goal, { sessionQueueCounts: queueCounts }),
+          };
+        },
+        updateItem: async (input) => {
+          const outcome = await transitionGoalWorkItem(input);
+          if (!outcome.ok) {
+            return {
+              ok: false as const,
+              errorCode: outcome.errorCode,
+              message: outcome.message,
+            };
+          }
+          const queueCounts = await resolveGoalBoardQueueCounts([outcome.goal]);
+          return {
+            ok: true as const,
+            goal: outcome.goal,
+            item: outcome.item,
+            newlyUnlockedIds: outcome.newlyUnlockedIds,
+            nextActions: computeGoalNextActions(outcome.goal, {
+              sessionQueueCounts: queueCounts,
+            }),
+          };
+        },
+      },
       renameSessions: async ({ changes, dryRun }) => {
         if (!tryGetDbClient()) {
           return { ok: false, errorCode: 'HOST_NOT_READY', message: 'localDb not ready' };

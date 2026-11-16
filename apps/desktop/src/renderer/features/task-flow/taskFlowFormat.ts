@@ -1,4 +1,5 @@
 import { formatDuration } from '@cindy/maker-shared/message-render';
+import type { GoalWorkItemStatus } from '../../../shared/goalBoard';
 import type {
   TaskFlowEdgeKind,
   TaskFlowNode,
@@ -7,7 +8,7 @@ import type {
 } from '../../../shared/taskFlowGraph';
 
 export type TaskFlowTimeWindow = '1h' | '6h' | '24h' | '7d' | 'all';
-export type TaskFlowViewMode = 'gantt' | 'dag';
+export type TaskFlowViewMode = 'goals' | 'gantt' | 'dag';
 export type TaskFlowSwimlaneMode = 'hierarchy' | 'computer' | 'chain';
 
 export const TASK_FLOW_TIME_WINDOW_MS: Record<TaskFlowTimeWindow, number | null> = {
@@ -153,4 +154,37 @@ export function edgeKindLabel(
     blocked_by: '前置阻塞依赖',
   };
   return safeTaskFlowTr(t, `taskFlow.edgeKind.${kind}`, fallbacks[kind]);
+}
+
+export function goalItemStatusColorVar(status: GoalWorkItemStatus): string {
+  switch (status) {
+    case 'in_progress':
+      return 'var(--warning-accent)';
+    case 'ready':
+      return 'var(--focus-ring)';
+    case 'in_review':
+      return 'var(--card-status-awaiting)';
+    case 'completed':
+      return 'var(--card-status-done)';
+    case 'blocked':
+      return 'var(--card-status-error)';
+    case 'pending':
+    default:
+      return 'var(--text-tertiary)';
+  }
+}
+
+export function goalItemStatusLabel(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  status: GoalWorkItemStatus,
+): string {
+  const fallbacks: Record<GoalWorkItemStatus, string> = {
+    pending: '待前置解锁',
+    ready: '可派发',
+    in_progress: '进行中',
+    in_review: '待验收',
+    completed: '已完成',
+    blocked: '受阻',
+  };
+  return safeTaskFlowTr(t, `taskFlow.goalStatus.${status}`, fallbacks[status]);
 }

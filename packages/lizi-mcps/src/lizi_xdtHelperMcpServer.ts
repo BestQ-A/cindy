@@ -113,6 +113,7 @@ import {
 import { registerRemoteControlRequestTool, registerListMachinesTool, type ListMachinesCallbacks } from './xdt-helper/list_machines.js';
 import { registerTeammateHomeTools, type TeammateHomeCallbacks } from './xdt-helper/teammate_home.js';
 import { registerTeammateGroupTools, type TeammateGroupsCallbacks } from './xdt-helper/teammate_groups.js';
+import { registerGoalBoardTools, type GoalBoardCallbacks } from './xdt-helper/goal_board.js';
 import {
   registerBotCapabilityTools,
   registerAppDefaultModelTools,
@@ -180,6 +181,7 @@ export const HELPER_CATEGORY_DESCRIPTIONS: Record<(typeof CATEGORY_ENUM)[number]
     `${BRAND_NAME} 能力说明、界面操作帮助（get_capabilities scope=help）与当前任务信息；`,
     `get_capabilities({key:"self-management"}) 是管理自己的任务、定时任务、项目、伙伴的工具索引；`,
     `get_capabilities({key:"computer-use"}) 说明桌面操作没开时怎么引导用户开启。`,
+    `共享目标看板与波次编排（goal_board_get / goal_board_upsert / goal_item_update）；`,
     `本机。`,
   ].join(''),
   settings: [
@@ -542,6 +544,8 @@ export interface XdtHelperMcpDeps {
   teammateHome?: TeammateHomeCallbacks;
   /** Reading and batch/smart organizing the teammate hierarchy folder tree. */
   teammateGroups?: TeammateGroupsCallbacks;
+  /** Shared goal board and wave-gated work orchestration tools. */
+  goalBoard?: GoalBoardCallbacks;
   /** What machines this account has and their live resources. */
   machines?: ListMachinesCallbacks;
   /**
@@ -807,6 +811,13 @@ export function createXdtHelperMcpServer(
       getSessionContext: () => resolveLiziMcpSessionContext(sessionCtx),
       callbacks: deps.teammateGroups,
     });
+  }
+  if (deps.goalBoard) {
+    registerGoalBoardTools(
+      registry,
+      () => resolveLiziMcpSessionContext(sessionCtx),
+      deps.goalBoard,
+    );
   }
   if (deps.modelSettings) registerAppModelsTools(registry, deps.modelSettings, () => resolveLiziMcpSessionContext(sessionCtx));
   if (deps.piRuntime) registerPiRuntimeTools(registry, deps.piRuntime, () => resolveLiziMcpSessionContext(sessionCtx));

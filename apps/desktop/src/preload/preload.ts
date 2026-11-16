@@ -6403,6 +6403,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ): Promise<import('../shared/taskFlowGraph').TaskFlowSnapshot> =>
         ipcRenderer.invoke('local-db:task-flow:snapshot', opts),
     },
+    goalBoard: {
+      get: (): Promise<{ ownerId: string | null; config: import('../shared/goalBoard').GoalBoardConfigV1 }> =>
+        ipcRenderer.invoke('local-db:goal-board:get'),
+      upsert: (
+        input: import('../main/maker-ipc/goalBoardStore').GoalUpsertInput,
+      ): Promise<{
+        ownerId: string | null;
+        config: import('../shared/goalBoard').GoalBoardConfigV1;
+        goal: import('../shared/goalBoard').GoalRecord;
+      }> => ipcRenderer.invoke('local-db:goal-board:upsert', input),
+      transitionItem: (
+        input: { goalId: string } & import('../shared/goalBoard').GoalItemTransitionInput,
+      ): Promise<unknown> => ipcRenderer.invoke('local-db:goal-board:transition-item', input),
+      remove: (
+        goalId: string,
+      ): Promise<{ ownerId: string | null; config: import('../shared/goalBoard').GoalBoardConfigV1 }> =>
+        ipcRenderer.invoke('local-db:goal-board:remove', goalId),
+      onChanged: createIpcFanOut('local-db:goal-board:changed'),
+    },
     projectAliases: {
       list: (): Promise<unknown> => ipcRenderer.invoke('local-db:project-aliases:list'),
       set: (input: { projectKey: string; alias: string }): Promise<unknown> =>

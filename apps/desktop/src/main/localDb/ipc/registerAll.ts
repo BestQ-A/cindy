@@ -2,6 +2,7 @@ import { reconcileDeletedTaskViewState } from '../../mcp-apps/viewStateStore.js'
 import { registerCompanionImport } from '../../bot-import/registration.js';
 import { registerTaskTagsIpc } from './taskTags';
 import { registerTaskFlowIpc } from './taskFlow';
+import { registerGoalBoardIpc } from '../../maker-ipc/goalBoardStore';
 /**
  * chat-data-localization F2/F5：聚合注册所有 localDb IPC handlers + ensure-ready。
  *
@@ -233,6 +234,7 @@ export function registerLocalDbIpc(opts: RegisterLocalDbIpcOpts = {}): void {
   registerProjectAliasesIpc();
   registerTaskTagsIpc();
   registerTaskFlowIpc();
+  registerGoalBoardIpc();
   registerRightSidebarTabsIpc();
   // Durable Subagent projection writes share the agent event path's FIFO, so a
   // reconciliation and an agent_task_update cannot both insert the first

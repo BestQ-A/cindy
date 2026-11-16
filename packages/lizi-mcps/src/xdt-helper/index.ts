@@ -212,6 +212,21 @@ export {
   type TeammateGroupErrorCode,
 } from './teammate_groups.js';
 export {
+  registerGoalBoardTools,
+  type GoalBoardCallbacks,
+  type GoalBoardStatusWire,
+  type GoalWorkItemStatusWire,
+  type GoalWorkItemWire,
+  type GoalRecordWire,
+  type GoalNextActionsWire,
+  type GoalBoardUpsertItemInputWire,
+  type GoalBoardUpsertRequestWire,
+  type GoalBoardItemUpdateRequestWire,
+  type GoalBoardGetResultWire,
+  type GoalBoardUpsertResultWire,
+  type GoalBoardItemUpdateResultWire,
+} from './goal_board.js';
+export {
   registerBotCapabilityTools,
   buildFindBotCapabilitiesDescription,
   withCindyGatedBotToolDescriptions,

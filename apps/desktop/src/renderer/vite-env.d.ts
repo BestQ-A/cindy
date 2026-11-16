@@ -5614,6 +5614,68 @@ interface ElectronAPI {
         opts?: { includeScheduled?: boolean; includeRemote?: boolean; limitSessions?: number },
       ) => Promise<import('../shared/taskFlowGraph').TaskFlowSnapshot>;
     };
+    goalBoard: {
+      get: () => Promise<{ ownerId: string | null; config: import('../shared/goalBoard').GoalBoardConfigV1 }>;
+      upsert: (input: {
+        id?: string;
+        title: string;
+        objective?: string;
+        projectPath?: string;
+        pmRole?: string;
+        pmBotId?: string;
+        pmSessionId?: string;
+        status?: import('../shared/goalBoard').GoalStatus;
+        exitCriteria?: string[];
+        items?: Array<{
+          id: string;
+          title: string;
+          status?: import('../shared/goalBoard').GoalWorkItemStatus;
+          blockedBy?: string[];
+          ownerRole?: string;
+          ownerBotId?: string;
+          ownerSessionId?: string;
+          backupOwnerRole?: string;
+          backupOwnerBotId?: string;
+          reviewerRole?: string;
+          reviewerBotId?: string;
+          reviewerSessionId?: string;
+          artifactPaths?: string[];
+          acceptanceCriteria?: string;
+          evidenceSummary?: string;
+          blockerReason?: string;
+        }>;
+      }) => Promise<{
+        ownerId: string | null;
+        config: import('../shared/goalBoard').GoalBoardConfigV1;
+        goal: import('../shared/goalBoard').GoalRecord;
+      }>;
+      transitionItem: (
+        input: { goalId: string } & import('../shared/goalBoard').GoalItemTransitionInput,
+      ) => Promise<
+        | {
+            ok: true;
+            ownerId: string | null;
+            config: import('../shared/goalBoard').GoalBoardConfigV1;
+            goal: import('../shared/goalBoard').GoalRecord;
+            item: import('../shared/goalBoard').GoalWorkItem;
+            newlyUnlockedIds: string[];
+          }
+        | {
+            ok: false;
+            errorCode: string;
+            message: string;
+          }
+      >;
+      remove: (
+        goalId: string,
+      ) => Promise<{ ownerId: string | null; config: import('../shared/goalBoard').GoalBoardConfigV1 }>;
+      onChanged: (
+        callback: (
+          snapshot: { ownerId: string | null; config: import('../shared/goalBoard').GoalBoardConfigV1 },
+          ownerStamp?: import('../shared/dataOwnerPush').DataOwnerPushStamp,
+        ) => void,
+      ) => () => void;
+    };
     /** V0.4 (C10): one-shot toast trigger when ensureReady ran two-level fallback. */
     onCorruptionRestored: (cb: (info: CorruptionRestoredPayload) => void) => () => void;
     /** #37: release 端检测到 schema drift 时的一次性 toast 事件。 */

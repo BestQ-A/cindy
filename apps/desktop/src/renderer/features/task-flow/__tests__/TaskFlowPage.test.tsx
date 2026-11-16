@@ -205,4 +205,115 @@ describe('TaskFlowPage', () => {
     expect(mocks.pinSessionOrigin).toHaveBeenCalledWith('mac-mini', 's-remote');
     expect(screen.getByTestId('router-location').textContent).toBe('/cc-agent/s-remote');
   });
+
+  it('shows active goal banner, switches to Goal Board tab with critical blocker fallback, and opens item session', async () => {
+    const goalGetMock = vi.fn(async () => ({
+      ownerId: 'owner-1',
+      config: {
+        version: 1 as const,
+        updatedAtMs: now,
+        goals: [
+          {
+            id: 'goal-m0',
+            title: 'M0 可玩切片封板',
+            objective: '完成 A–G 收口并通过 G-M0',
+            pmRole: 'M01',
+            pmSessionId: 's-m01',
+            status: 'active' as const,
+            exitCriteria: ['G-M0 PASS'],
+            items: [
+              {
+                id: 'A',
+                title: '范围基线定稿',
+                status: 'completed' as const,
+                blockedBy: [],
+                ownerRole: 'M01',
+                reviewerRole: 'Q01',
+                reviewVerdict: 'PASS' as const,
+                artifactPaths: ['design/06_production/m0-scope-baseline-20261116.md'],
+                wave: 0,
+                isCriticalPath: false,
+                updatedAtMs: now - 10_000,
+              },
+              {
+                id: 'B',
+                title: '核心循环差距核对',
+                status: 'in_review' as const,
+                blockedBy: ['A'],
+                ownerRole: 'D01',
+                ownerSessionId: 's-d01',
+                reviewerRole: 'M01',
+                artifactPaths: ['design/02_gdd/m0-acceptance-slice-20261116.md'],
+                wave: 1,
+                isCriticalPath: true,
+                updatedAtMs: now - 5_000,
+              },
+              {
+                id: 'E',
+                title: '固定可玩候选包',
+                status: 'blocked' as const,
+                blockedBy: ['A', 'B'],
+                ownerRole: 'HB05',
+                backupOwnerRole: 'HB01',
+                reviewerRole: 'Q01',
+                blockerReason: 'HB05 会话模型 token 上限报错',
+                artifactPaths: ['build-wx/m0-review-20261116/'],
+                wave: 2,
+                isCriticalPath: true,
+                updatedAtMs: now - 1_000,
+              },
+            ],
+            createdAtMs: now - 20_000,
+            updatedAtMs: now,
+          },
+        ],
+      },
+    }));
+
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: {
+        localDb: {
+          taskFlow: {
+            snapshot: mocks.snapshotFn,
+          },
+          goalBoard: {
+            get: goalGetMock,
+            transitionItem: vi.fn(),
+          },
+        },
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/cc-agent/task-flow']}>
+        <TaskFlowPage />
+        <LocationEcho />
+      </MemoryRouter>,
+    );
+
+    const strip = await screen.findByTestId('active-goal-strip');
+    expect(strip.textContent).toContain('M0 可玩切片封板');
+    expect(strip.textContent).toContain('Wave 2');
+
+    const goalTab = screen.getByRole('tab', { name: /目标看板/ });
+    await act(async () => {
+      fireEvent.click(goalTab);
+    });
+
+    const board = await screen.findByTestId('task-flow-goal-board');
+    expect(board).toBeTruthy();
+
+    const blockerAlert = screen.getByTestId('goal-critical-blocker-alert');
+    expect(blockerAlert.textContent).toContain('HB01');
+    expect(blockerAlert.textContent).toContain('固定可玩候选包');
+
+    const bCard = board.querySelector('[data-goal-item-id="B"]') as HTMLElement;
+    expect(bCard).toBeTruthy();
+    const openBtn = bCard.querySelector('button:last-of-type') as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(openBtn);
+    });
+    expect(screen.getByTestId('router-location').textContent).toBe('/cc-agent/s-d01');
+  });
 });

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { GitBranch, Layers, RefreshCw, Search, Timer } from 'lucide-react';
+import { GitBranch, Layers, RefreshCw, Search, Target, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   computeLineage,
@@ -11,6 +11,7 @@ import { WINDOW_DRAG_STYLE, WINDOW_NO_DRAG_STYLE } from '@/components/layout/win
 import { cn } from '@/lib/utils';
 import { TaskFlowDagView } from './TaskFlowDagView';
 import { TaskFlowGanttView } from './TaskFlowGanttView';
+import { TaskFlowGoalBoardView } from './TaskFlowGoalBoardView';
 import { TaskFlowInspector } from './TaskFlowInspector';
 import {
   TASK_FLOW_TIME_WINDOW_MS,
@@ -19,6 +20,7 @@ import {
   type TaskFlowTimeWindow,
   type TaskFlowViewMode,
 } from './taskFlowFormat';
+import { useGoalBoard } from './useGoalBoard';
 import { useTaskFlowSnapshot } from './useTaskFlowSnapshot';
 
 export function TaskFlowPage() {
@@ -35,6 +37,7 @@ export function TaskFlowPage() {
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   const { snapshot, loading, error, nowMs, refresh } = useTaskFlowSnapshot(includeScheduled);
+  const goalBoard = useGoalBoard();
 
   const filtered = useMemo(() => {
     if (!snapshot) {
@@ -130,6 +133,26 @@ export function TaskFlowPage() {
             <button
               type="button"
               role="tab"
+              aria-selected={viewMode === 'goals'}
+              onClick={() => setViewMode('goals')}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors',
+                viewMode === 'goals'
+                  ? 'bg-[var(--surface-chip)] font-medium text-[var(--text-primary)]'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]',
+              )}
+            >
+              <Target className="h-3.5 w-3.5" />
+              <span>{safeTaskFlowTr(t, 'taskFlow.views.goals', '目标看板')}</span>
+              {goalBoard.nextActions && (
+                <span className="rounded-full bg-[var(--panel-bg)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-secondary)]">
+                  {goalBoard.nextActions.progressPct}%
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={viewMode === 'dag'}
               onClick={() => setViewMode('dag')}
               className={cn(
@@ -146,19 +169,52 @@ export function TaskFlowPage() {
 
           <button
             type="button"
-            onClick={() => void refresh()}
-            disabled={loading}
+            onClick={() => void Promise.all([refresh(), goalBoard.refreshGoalBoard()])}
+            disabled={loading || goalBoard.loading}
             className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] px-3 py-1.5 text-xs hover:bg-[var(--surface-hover)] disabled:opacity-50"
           >
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+            <RefreshCw className={cn('h-3.5 w-3.5', (loading || goalBoard.loading) && 'animate-spin')} />
             <span>{safeTaskFlowTr(t, 'taskFlow.refresh', '刷新')}</span>
           </button>
         </div>
       </header>
 
-      {/* KPI Summary + Filters */}
-      <div className="space-y-3 border-b border-[var(--border-default)] px-6 py-3">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* KPI Summary + Filters (hidden inside Goal Board tab to keep Wave columns roomy) */}
+      {viewMode !== 'goals' && (
+        <div className="space-y-3 border-b border-[var(--border-default)] px-6 py-3">
+          {goalBoard.activeGoal && goalBoard.nextActions && (
+            <button
+              type="button"
+              onClick={() => setViewMode('goals')}
+              data-testid="active-goal-strip"
+              className="flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)] px-3.5 py-2 text-left text-xs transition-colors hover:bg-[var(--surface-hover)]"
+            >
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Target className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--focus-ring)' }} />
+                <span className="truncate font-medium text-[var(--text-primary)]">
+                  {goalBoard.activeGoal.title}
+                </span>
+                <span className="rounded-full bg-[var(--panel-bg)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-secondary)]">
+                  Wave {goalBoard.nextActions.currentWave + 1} · {goalBoard.nextActions.progressPct}% (
+                  {goalBoard.nextActions.completedCount}/{goalBoard.nextActions.totalCount})
+                </span>
+                {goalBoard.nextActions.criticalBlockers.length > 0 && (
+                  <span
+                    className="rounded-full bg-[var(--panel-bg)] px-2 py-0.5 text-[11px] font-medium"
+                    style={{ color: 'var(--card-status-error)' }}
+                  >
+                    {safeTaskFlowTr(t, 'taskFlow.goalBoard.blockerStripBadge', '关键路径阻塞 {{count}}', {
+                      count: goalBoard.nextActions.criticalBlockers.length,
+                    })}
+                  </span>
+                )}
+              </div>
+              <span className="shrink-0 text-[11px] text-[var(--text-secondary)]">
+                {safeTaskFlowTr(t, 'taskFlow.goalBoard.viewWavesAction', '查看目标波次 →')}
+              </span>
+            </button>
+          )}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)] px-3.5 py-2.5">
             <div className="text-lg font-medium font-mono tabular-nums">{stats.totalNodes}</div>
             <div className="text-xs text-[var(--text-secondary)]">
@@ -267,11 +323,21 @@ export function TaskFlowPage() {
             {error}
           </div>
         )}
-      </div>
+        </div>
+      )}
 
       {/* Main Canvas + Inspector */}
       <div className="flex min-h-0 flex-1 gap-4 p-4 px-6">
-        {viewMode === 'gantt' ? (
+        {viewMode === 'goals' ? (
+          <TaskFlowGoalBoardView
+            goals={goalBoard.config.goals}
+            activeGoal={goalBoard.activeGoal}
+            nextActions={goalBoard.nextActions}
+            error={goalBoard.error}
+            onSelectGoal={goalBoard.selectGoalId}
+            onTransitionItem={goalBoard.transitionItem}
+          />
+        ) : viewMode === 'gantt' ? (
           <TaskFlowGanttView
             nodes={filtered.nodes}
             edges={filtered.edges}
@@ -299,15 +365,17 @@ export function TaskFlowPage() {
           />
         )}
 
-        <TaskFlowInspector
-          node={selectedNode}
-          selfDeviceId={snapshot?.selfDeviceId ?? null}
-          nodesById={nodesById}
-          edges={filtered.edges}
-          nowMs={nowMs}
-          onSelectNode={setSelectedNodeId}
-          onClose={() => setSelectedNodeId(null)}
-        />
+        {viewMode !== 'goals' && (
+          <TaskFlowInspector
+            node={selectedNode}
+            selfDeviceId={snapshot?.selfDeviceId ?? null}
+            nodesById={nodesById}
+            edges={filtered.edges}
+            nowMs={nowMs}
+            onSelectNode={setSelectedNodeId}
+            onClose={() => setSelectedNodeId(null)}
+          />
+        )}
       </div>
     </div>
   );
