@@ -79,7 +79,7 @@ export async function readNativeAccount(
   provider: SubscriptionProvider,
   directory: string,
   options?: { force?: boolean },
-): Promise<AuthState & { plan?: string; loginExpiresAt?: string }> {
+): Promise<AuthState & { plan?: string; planTier?: string; planType?: string; loginExpiresAt?: string }> {
   if (provider === 'anthropic') {
     const result = await refreshClaudeCliLoginStatus({
       configDir: directory === path.join(homedir(), '.claude') ? undefined : directory,
@@ -90,6 +90,7 @@ export async function readNativeAccount(
       identity: result.email,
       authSource: 'oauth',
       plan: result.subscriptionType,
+      planTier: result.planTier,
       ...(result.loginExpiresAt ? { loginExpiresAt: result.loginExpiresAt } : {}),
     };
   }
@@ -101,6 +102,7 @@ export async function readNativeAccount(
     authenticated: result.account?.type === 'chatgpt',
     identity: result.account?.email,
     plan: result.account?.planType,
+    planType: result.account?.planType,
     authSource: 'oauth',
     // The CLI can hide an existing ChatGPT login when its active provider owns
     // authentication. Repeating login cannot make that provider expose the account.
@@ -205,6 +207,7 @@ export function codexAccountRpc(
   directory: string,
   method: string,
   params: unknown,
+  canDispatch?: () => boolean | Promise<boolean>,
 ): Promise<unknown> {
   const binary = getReadyBinaryPath('codex');
   if (!binary) return Promise.reject(new Error('Codex CLI unavailable'));
@@ -227,6 +230,20 @@ export function codexAccountRpc(
     };
     const timer = setTimeout(() => finish(new Error('Codex account read timed out')), 15_000);
     const send = (message: unknown) => child.stdin.write(JSON.stringify(message) + '\n');
+    const dispatch = async () => {
+      try {
+        if (canDispatch) {
+          const allowed = canDispatch();
+          // Existing synchronous proofs and the write must stay in the same synchronous segment.
+          if (!(typeof allowed === 'boolean' ? allowed : await allowed))
+            return finish(new Error('Codex account changed before dispatch'));
+        }
+        // An asynchronous credential/source check can outlive this control connection.
+        if (!settled) send({ id: 2, method, params });
+      } catch {
+        finish(new Error('Codex account changed before dispatch'));
+      }
+    };
     child.stdin.on('error', () => finish(new Error('Codex account connection closed')));
     child.on('error', () => finish(new Error('Codex CLI unavailable')));
     child.on('close', () => finish(new Error('Codex account connection closed')));
@@ -246,7 +263,9 @@ export function codexAccountRpc(
         if (message.error) return finish(new Error('Codex account request failed'));
         if (message.id === 1) {
           send({ method: 'initialized', params: {} });
-          send({ id: 2, method, params });
+          // Startup may await configuration/auth refresh. A reset must still use
+          // the exact credential observed before spawning this control connection.
+          void dispatch();
         } else if (message.id === 2) finish(undefined, message.result);
       }
     });

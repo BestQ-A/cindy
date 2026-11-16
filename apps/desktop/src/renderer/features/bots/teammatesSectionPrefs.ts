@@ -92,3 +92,14 @@ export function readTeammatesCompactDensity(ownerId: string | null): boolean {
 export function writeTeammatesCompactDensity(ownerId: string | null, compact: boolean): void {
   writeOwnerFlag(COMPACT_DENSITY_KEY, ownerId, compact);
 }
+
+export type TeammatesViewMode = 'icons' | 'list';
+const VIEW_KEY = 'sidebar.teammatesView.v1';
+
+export function readTeammatesViewMode(ownerId: string | null): TeammatesViewMode {
+  return readSidebarOwnerStorage(VIEW_KEY, ownerId) === 'icons' ? 'icons' : 'list';
+}
+
+export function writeTeammatesViewMode(ownerId: string | null, mode: TeammatesViewMode): void {
+  writeSidebarOwnerStorage(VIEW_KEY, ownerId, mode);
+}

@@ -47,6 +47,7 @@ import {
   CLAIM_COMPANION_HOME_FLAG,
   focusMainWindow,
   handleIncomingDeepLink,
+  handleIncomingShareFile,
   openMainWindowVoiceSettings,
   openMainWindowSession,
   openMainWindowRemoteControlSettings,
@@ -595,6 +596,16 @@ describe('dual scheme (cindy primary + legacy xdt-maker)', () => {
     expect(takePendingDeepLink()).toEqual({ type: 'session', id: 'external-task' });
   });
 
+  // Unit: a plugin package is account-owned, unlike an external file-open intent.
+  // The old share-file entry could not bind a buffered wizard to its owner.
+  it('drops a buffered native package wizard after its owner changes', () => {
+    setDeepLinkMainWindow(null);
+    takePendingDeepLink();
+    handleIncomingShareFile('/fixture/task.cshare', 'host-tool', { ownerScopeKey: String(owner.generation) });
+    owner.generation += 1;
+    expect(takePendingDeepLink()).toBeNull();
+  });
+
   it('buffers only the opaque provider import id during cold start', () => {
     setDeepLinkMainWindow(null);
     handleIncomingDeepLink(providerImportUrl('cindy'), 'test');
@@ -928,4 +939,13 @@ describe('fixed local plugin share navigation', () => {
   it.each(['?install=1', '?url=https://example.test/file', '#auto', '/other', '/../other'])('rejects extra behavior %s', suffix => {
     expect(parseDeepLink(`cindy://plugin-share/${snapshotId}${suffix}`)).toBeNull();
   });
+});
+
+// Unit: a device-qualified URL must never degrade to the old local-only settings path.
+it('preserves settings device identity and refuses ambiguous settings links', () => {
+  expect(parseDeepLink('cindy://settings-link/general?device=computer-a&query=font')).toEqual({
+    type: 'settings-navigation', target: { tab: 'general', deviceId: 'computer-a', query: 'font' },
+  });
+  expect(parseDeepLink('cindy://settings-link/providers?device=a&device=b')).toBeNull();
+  expect(parseDeepLink('cindy://settings-link/providers?device=a&command=run')).toBeNull();
 });

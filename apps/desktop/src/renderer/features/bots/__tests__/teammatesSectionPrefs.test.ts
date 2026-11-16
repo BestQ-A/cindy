@@ -7,13 +7,14 @@ import {
   readTeammatesCompactDensity,
   readTeammatesGroupByComputer,
   readTeammatesSectionCollapsed,
+  readTeammatesViewMode,
   writeTeammatesCollapsedComputers,
   writeTeammatesCollapsedFolders,
   writeTeammatesCompactDensity,
   writeTeammatesGroupByComputer,
   writeTeammatesSectionCollapsed,
+  writeTeammatesViewMode,
 } from '../teammatesSectionPrefs';
-
 beforeEach(() => localStorage.clear());
 
 describe('teammates section collapse preference', () => {
@@ -83,4 +84,15 @@ describe('teammates hierarchy display and folder preferences', () => {
     expect(readTeammatesGroupByComputer('owner-b')).toBe(false);
     expect(readTeammatesCompactDensity('owner-b')).toBe(false);
   });
+});
+
+// Display preference was previously inseparable from collapse. Keep account isolation
+// and collapse independent at the production persistence boundary (unit tier).
+it('stores icon mode independently from collapse and other accounts', () => {
+  writeTeammatesViewMode('owner-a', 'icons');
+  writeTeammatesSectionCollapsed('owner-a', true);
+  expect(readTeammatesViewMode('owner-a')).toBe('icons');
+  expect(readTeammatesViewMode('owner-b')).toBe('list');
+  writeTeammatesSectionCollapsed('owner-a', false);
+  expect(readTeammatesViewMode('owner-a')).toBe('icons');
 });

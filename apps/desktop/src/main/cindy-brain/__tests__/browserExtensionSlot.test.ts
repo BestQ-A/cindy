@@ -276,7 +276,7 @@ describe('browserExtensionSlot · 桥接随花名册启停', () => {
     expect(slot.getPageControl()).toBeNull();
   });
 
-  // 2026-10-30: only the official Cindy Chrome takes over My browser; another plugin's declaration is ignored.
+  // The shared provider seam accepts any approved pageControl implementation.
   it('普通插件声明 pageControl 后可成为「我的浏览器」', async () => {
     const ghosts = [extGhost({ id: 'other-browser', nativeHost: false })];
     const { slot, bridges, settle } = await makeSlot({}, ghosts);
@@ -314,7 +314,9 @@ describe('browserExtensionSlot · 更新来源收敛', () => {
     ghosts[0] = { ...ghosts[0], publishingSource: { kind: 'public-market', pluginId: 'market-browser' } };
     complete();
     h.slot.reconcile(ghosts);
-    await h.settle();
+    // PR #10357 Windows CI: restoring the saved pairings can outlast a 25 ms sleep.
+    // The public status request waits for startup, including the real cache read.
+    expect(await h.slot.handleRequest('_root__my-browser', { kind: 'status' })).toMatchObject({ ok: true });
     expect(h.slot.getPageControl()?.instanceId).toBe('_root__my-browser');
     expect(h.bridges.at(-1)?.calls).toContainEqual(['setTrustedClients', [clients]]);
     await h.slot.dispose();

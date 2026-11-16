@@ -643,7 +643,6 @@ export function TeammatesHierarchyTree({
                     <BotGroupSidebarAvatar
                       members={entry.group.members}
                       compact
-                      selected={entry.selected}
                     />
                   </span>
                 </span>
