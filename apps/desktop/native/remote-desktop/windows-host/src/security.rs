@@ -192,6 +192,17 @@ pub fn verify_protected(paths: Vec<PathBuf>) -> Staged<Vec<Handle>> {
     Ok(handles)
 }
 
+pub fn is_packaged_cindy_exe(name: &std::ffi::OsStr) -> bool {
+    [
+        "Cindy.exe",
+        "CindyDev.exe",
+        "CindyPrivacy.exe",
+        "CindyPrivacyCN.exe",
+    ]
+    .iter()
+    .any(|allowed| name.eq_ignore_ascii_case(allowed))
+}
+
 /// Accepts a Cindy process as the owner of this service's lease.
 ///
 /// `install` is the directory the staged copy records as its installation.
@@ -211,9 +222,7 @@ pub fn authorize_client(pid: u32, install: &Path, development: bool) -> Result<(
     }
     let client_image = image(client.0)?;
     let packaged = client_image.parent().is_some_and(|p| same_file(p, install))
-        && client_image.file_name().is_some_and(|n| {
-            n.eq_ignore_ascii_case("Cindy.exe") || n.eq_ignore_ascii_case("CindyDev.exe")
-        });
+        && client_image.file_name().is_some_and(is_packaged_cindy_exe);
     // Source-mode Electron is named electron.exe and lives under
     // node_modules, so it cannot satisfy the packaged installation-parent
     // check. The PID is still the one explicitly approved by the elevated
@@ -234,4 +243,33 @@ pub fn authorize_client(pid: u32, install: &Path, development: bool) -> Result<(
 pub fn same_contents(a: &Path, b: &Path) -> Result<bool> {
     let (a, b) = (std::fs::read(a)?, std::fs::read(b)?);
     Ok(a == b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn packaged_cindy_exe_accepts_standard_and_privacy_names() {
+        for allowed in [
+            "Cindy.exe",
+            "cindy.exe",
+            "CindyDev.exe",
+            "CindyPrivacy.exe",
+            "CindyPrivacyCN.exe",
+            "cindyprivacycn.EXE",
+        ] {
+            assert!(
+                is_packaged_cindy_exe(OsStr::new(allowed)),
+                "expected {allowed} to be accepted"
+            );
+        }
+        for rejected in ["cmd.exe", "powershell.exe", "electron.exe", "CindyHelper.exe"] {
+            assert!(
+                !is_packaged_cindy_exe(OsStr::new(rejected)),
+                "expected {rejected} to be rejected"
+            );
+        }
+    }
 }

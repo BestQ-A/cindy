@@ -294,7 +294,7 @@ fn powershell_script(
     if let Some(main) = trusted_main {
         script.push_str(" $main=");
         script.push_str(&powershell_literal(&main.to_string_lossy()));
-        script.push_str("; function Get-Signer([string]$Path) { $sig=Get-AuthenticodeSignature -LiteralPath $Path; if ($sig.Status -ne 'Valid' -or $null -eq $sig.SignerCertificate) { return $null }; return $sig.SignerCertificate.Thumbprint.ToUpperInvariant() }; $mainSigner=Get-Signer $main; if ($null -eq $mainSigner) { throw 'setup refused' }; if ((Get-Signer $source) -ne $mainSigner -or (Get-Signer $inputPath) -ne $mainSigner) { throw 'setup refused' };");
+        script.push_str("; function Get-Signer([string]$Path) { $sig=Get-AuthenticodeSignature -LiteralPath $Path; if ($sig.Status -ne 'Valid' -or $null -eq $sig.SignerCertificate) { return $null }; return $sig.SignerCertificate.Thumbprint.ToUpperInvariant() }; $mainSig=Get-AuthenticodeSignature -LiteralPath $main; $mainSigner=Get-Signer $main; $mainLeaf=Split-Path -Leaf $main; $unsignedPrivacy=($mainSig.Status -eq 'NotSigned') -and ($mainLeaf -ieq 'CindyPrivacyCN.exe' -or $mainLeaf -ieq 'CindyPrivacy.exe'); if ($null -ne $mainSigner) { if ((Get-Signer $source) -ne $mainSigner -or (Get-Signer $inputPath) -ne $mainSigner) { throw 'setup refused' } } elseif ($unsignedPrivacy) { if ((Get-AuthenticodeSignature -LiteralPath $source).Status -ne 'NotSigned' -or (Get-AuthenticodeSignature -LiteralPath $inputPath).Status -ne 'NotSigned') { throw 'setup refused' } } else { throw 'setup refused' };");
     }
     script.push_str("; $bootstrapDir=Split-Path -Parent $bootstrap; $stagingRoot=Split-Path -Parent $bootstrapDir; $programFiles=Split-Path -Parent $stagingRoot;");
     script.push_str(" $trusted=@('S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464');");
@@ -1068,5 +1068,50 @@ mod tests {
             false,
         );
         assert!(script.contains(awkward));
+    }
+
+    #[test]
+    fn elevated_bootstrap_script_parses_for_privacy_cn() {
+        let args = vec![
+            "--install-from".to_owned(),
+            r"C:\Users\Administrator\AppData\Local\Programs\CindyPrivacyCN\resources\tools\remote-desktop\cindy-windows-desktop-host.exe"
+                .to_owned(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_owned(),
+            "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210".to_owned(),
+            "4321".to_owned(),
+        ];
+        let script = powershell_script(
+            Path::new(
+                r"C:\Users\Administrator\AppData\Local\Programs\CindyPrivacyCN\resources\tools\remote-desktop\cindy-windows-desktop-host.exe",
+            ),
+            Path::new(
+                r"C:\Program Files\Cindy Remote Desktop\abc\cindy-windows-desktop-bootstrap.exe",
+            ),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            Some(Path::new(
+                r"C:\Users\Administrator\AppData\Local\Programs\CindyPrivacyCN\CindyPrivacyCN.exe",
+            )),
+            &args,
+            false,
+        );
+        let encoded = encode_powershell(&script);
+        let command = format!(
+            "[void][ScriptBlock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{}'))); exit 0",
+            encoded
+        );
+        let powershell = system_file("WindowsPowerShell\\v1.0\\powershell.exe")
+            .expect("System32 PowerShell is required on Windows");
+        let output = Command::new(powershell)
+            .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+            .output()
+            .expect("PowerShell parser should start");
+        assert!(
+            output.status.success(),
+            "generated privacy bootstrap script did not parse: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(script.contains("CindyPrivacyCN.exe"));
+        assert!(script.contains("$unsignedPrivacy"));
     }
 }
